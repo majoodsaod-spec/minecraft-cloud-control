@@ -118,4 +118,5 @@ aboutPage=function(p){
   section.append(element("p","muted small","Working: GitHub workflow status, start, cancellation, backup listing, and updating supported server.properties values for the next run. Not yet connected: live player list, direct console commands, remote file manager, plugin upload, and RCON."));
   section.append(button("Disconnect this tab",()=>{sessionStorage.removeItem("mccloud-admin");cloudPassword="";cloudState=null;render()},"outline"));p.prepend(section);
 };
+render();
 if(cloudPassword)cloudRefresh();
