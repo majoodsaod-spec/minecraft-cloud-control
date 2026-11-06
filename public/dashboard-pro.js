@@ -201,14 +201,14 @@ filesPage=function(p){
 pluginsPage=function(p){
   if(!cloudState){cloudUnlock(p);return}
   const panel=proPanel(p,"Plugin manager");
-  proNode(panel,"p","muted small","Upload Paper plugin JARs to persistent configuration. Installed plugins take effect when the server starts again.");
+  proNode(panel,"p","muted small","Upload, enable, disable, or remove Paper plugins. Changes take effect after a safe server restart.");
   const input=proNode(panel,"input");input.type="file";input.accept=".jar";
   const row=proNode(panel,"div","dashboard-actions");
   row.append(proAction("Upload plugin",async()=>{
     const file=input.files?.[0];
     if(!file){proToast("Select a .jar plugin first");return}
     if(!file.name.endsWith(".jar")){proToast("Only .jar plugins are accepted");return}
-    if(file.size>650000){proToast("This uploader supports JARs under 650 KiB. Larger plugins require a repository upload.");return}
+    if(file.size>5*1024*1024){proToast("This uploader supports plugin files up to 5 MiB.");return}
     const bytes=new Uint8Array(await file.arrayBuffer());
     let binary="";for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
     await cloudAction("plugin-upload",{name:file.name,content:btoa(binary)});
@@ -225,6 +225,14 @@ pluginsPage=function(p){
     const left=proNode(item,"div");
     proNode(left,"strong","",plugin.name);
     proNode(left,"div","muted small",Math.round(plugin.size/1024)+" KiB");
+    item.append(proAction(plugin.enabled===false?"Enable":"Disable",async()=>{
+      try{
+        await cloudApi("plugin-toggle",{name:plugin.name,enabled:plugin.enabled===false});
+        window.mcPlugins=(await cloudApi("plugin-list")).plugins;
+        toast("Plugin change saved. Restart the server to apply.");
+        render();
+      }catch(e){toast(e.message)}
+    },"outline"));
     item.append(proAction("Remove",async()=>{
       await cloudAction("plugin-remove",{name:plugin.name},"Remove "+plugin.name+" at the next restart?");
       window.mcPlugins=(await cloudApi("plugin-list")).plugins;render();
