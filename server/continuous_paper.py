@@ -129,6 +129,7 @@ def run(jar: Path) -> None:
     players = set()
     log_lines = deque(maxlen=100)
     bridge_restart = threading.Event()
+    bridge_shutdown = threading.Event()
     observed = {"last_join": time.monotonic(), "count": 0}
     def send(cmd: str) -> None:
         if proc.poll() is None:
@@ -160,7 +161,7 @@ def run(jar: Path) -> None:
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
     bridge=LiveBridge(DATA,os.environ.get("GITHUB_RUN_ID",str(int(time.time()))),
-                      players,lock,log_lines,ready,send,bridge_restart)
+                      players,lock,log_lines,ready,send,bridge_restart,bridge_shutdown)
     bridge.start()
     graceful = False
     try:
@@ -179,6 +180,9 @@ def run(jar: Path) -> None:
                 if remaining <= mark and mark not in warned and remaining > 0:
                     warned.add(mark)
                     send(f"say Server will restart in {mark} seconds. Please join again shortly.")
+            if bridge_shutdown.is_set():
+                print("Cloudflare requested safe stop: kick, save, backup, stay offline",flush=True)
+                break
             if bridge_restart.is_set():
                 print("Cloudflare requested safe restart",flush=True)
                 break
@@ -194,8 +198,13 @@ def run(jar: Path) -> None:
         if proc.poll() is not None:
             raise RuntimeError(f"Paper terminated unexpectedly: {proc.returncode}")
         if not STOPPED.is_set():
-            send("say Server is restarting now. Please join again shortly.")
-            send("kick @a Server restarting; please join again shortly.")
+            message = "Server is stopping; world is being saved. Join again later." if bridge_shutdown.is_set() else "Server is restarting; join again shortly."
+            send("say " + message)
+            with lock:
+                current_players = list(players)
+            for player in current_players:
+                send("kick " + player + " " + message)
+            time.sleep(2)
             time.sleep(2)
         send("save-all flush")
         time.sleep(5)
