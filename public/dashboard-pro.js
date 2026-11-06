@@ -133,6 +133,54 @@ function updateLiveMetrics(){
     if(node&&node.textContent!==value)node.textContent=value;
   }
 }
+function bedrockPanel(p, editable=false){
+  const bedrock=cloudState?.bedrock||{host:"",port:19132};
+  const panel=proPanel(p,"Bedrock Edition · Cross-play");
+  proNode(panel,"p","muted small",
+    "Geyser + Floodgate let Bedrock players join your existing world. Bedrock 26.60+ uses NetherNet; a separate Playit Minecraft Bedrock (NetherNet) tunnel is needed.");
+  const grid=proNode(panel,"div","server-metrics");
+  const host=proNode(grid,"div","panel server-stat");
+  proNode(host,"div","server-stat-label","Bedrock server address");
+  proNode(host,"strong","server-stat-value",bedrock.host||"Not configured");
+  const port=proNode(grid,"div","panel server-stat");
+  proNode(port,"div","server-stat-label","Bedrock public port");
+  proNode(port,"strong","server-stat-value",String(bedrock.port||19132));
+  const edition=proNode(grid,"div","panel server-stat");
+  proNode(edition,"div","server-stat-label","Connection");
+  proNode(edition,"strong","server-stat-value",bedrock.host?"Address saved":"Tunnel needed");
+  proNode(edition,"div","muted small","Reachability is not verified");
+  const actions=proNode(panel,"div","dashboard-actions");
+  const copy=proAction("Copy Bedrock address",async()=>{
+    const address=bedrock.host+":"+(bedrock.port||19132);
+    try{await navigator.clipboard.writeText(address);toast("Bedrock address copied");}
+    catch{window.prompt("Copy Bedrock server address",address);}
+  },"outline",!bedrock.host);
+  actions.append(copy);
+  if(!editable)actions.append(proAction("Configure Bedrock",()=>{tab="about";render()},"outline"));
+  if(editable){
+    const form=proNode(panel,"form","connect-form");
+    const hostInput=proField(form,"Public Bedrock tunnel hostname");
+    hostInput.value=bedrock.host||"";
+    hostInput.autocomplete="off";
+    const portInput=proField(form,"Public Bedrock port","number");
+    portInput.min=1;portInput.max=65535;portInput.value=bedrock.port||19132;
+    const save=proNode(form,"button","btn primary","Save Bedrock address");
+    save.type="submit";
+    form.onsubmit=async event=>{
+      event.preventDefault();
+      save.disabled=true;
+      try{
+        const result=await cloudApi("bedrock-address",{host:hostInput.value.trim(),port:Number(portInput.value)});
+        toast(result.message||"Address saved");
+        await cloudRefresh();
+        render();
+      }catch(error){toast(error.message)}
+      finally{save.disabled=false}
+    };
+    proNode(panel,"p","muted small","Enter the public hostname and port shown inside your Playit Bedrock (NetherNet) tunnel. This only changes the dashboard's displayed address; it does not create a tunnel.");
+  }
+  return panel;
+}
 const previousOverview=overview;
 overview=function(p){
   if(!cloudState){cloudUnlock(p);return}
@@ -178,6 +226,7 @@ overview=function(p){
   for(const [label,id] of [["Server settings","settings"],["Online players","players"],["Live console","console"],["World backups","worlds"],["Files","files"],["Plugins","plugins"]]){
     links.append(proAction(label,()=>{tab=id;render()}));
   }
+  bedrockPanel(p);
   if(cloudState.warnings?.length)cloudState.warnings.forEach(w=>proNotice(p,w));
   if(cloudError)proNotice(p,"Status refresh failed; showing last known data: "+cloudError);
   proNode(p,"div","dashboard-meta","Live status refreshes automatically every 5 seconds while this page is open.");
@@ -348,12 +397,19 @@ pluginsPage=function(p){
       render();
     }catch(e){proToast(e.message)}
   }));
-  if(!window.mcPlugins)proNode(panel,"p","muted small","Press Refresh plugin list to see plugins stored for installation.");
+  if(!window.mcPlugins && !window.mcPluginsLoading){
+    window.mcPluginsLoading=true;
+    cloudApi("plugin-list").then(data=>{
+      window.mcPlugins=data.plugins;
+      if(tab==="plugins")render();
+    }).catch(err=>toast(err.message)).finally(()=>window.mcPluginsLoading=false);
+  }
+  if(!window.mcPlugins)proNode(panel,"p","muted small","Loading installed and managed plugins…");
   for(const plugin of window.mcPlugins||[]){
     const item=proNode(panel,"div","backup-row");
     const left=proNode(item,"div");
     proNode(left,"strong","",plugin.name);
-    proNode(left,"div","muted small",Math.round(plugin.size/1024)+" KiB");
+    proNode(left,"div","muted small",plugin.managed?"Included with server · "+(plugin.enabled?"Enabled":"Disabled"):(Math.round(plugin.size/1024)+" KiB"));
     item.append(proAction(plugin.enabled===false?"Enable":"Disable",async()=>{
       try{
         await cloudApi("plugin-toggle",{name:plugin.name,enabled:plugin.enabled===false});
@@ -362,7 +418,7 @@ pluginsPage=function(p){
         render();
       }catch(e){toast(e.message)}
     },"outline"));
-    item.append(proAction("Remove",async()=>{
+    if(!plugin.managed)item.append(proAction("Remove",async()=>{
       await cloudAction("plugin-remove",{name:plugin.name},"Remove "+plugin.name+" at the next restart?");
       window.mcPlugins=(await cloudApi("plugin-list")).plugins;render();
     },"danger"));
@@ -403,6 +459,7 @@ aboutPage=function(p){
     const row=proNode(panel,"div","rowsetting");
     proNode(row,"strong","",k);proNode(row,"span","muted small",v);
   }
+  bedrockPanel(p,true);
   panel.append(proAction("Disconnect dashboard",()=>{
     cloudPassword="";cloudState=null;sessionStorage.removeItem("mccloud-admin");render();
   },"danger"));
