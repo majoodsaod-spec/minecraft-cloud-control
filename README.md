@@ -94,10 +94,13 @@ The server automatically installs the following **maintained** plugins from offi
 | Geyser-Spigot | Minecraft Bedrock/Java compatibility | Current official build on each server start, Bedrock NetherNet transport on local port 19132 |
 | Floodgate | Let authenticated Bedrock users join without Java Edition accounts | Official build, with Geyser set to `auth-type: floodgate` |
 | spark | Built-in Paper profiler | Paper already bundles spark; no duplicate JAR is installed. Use `/spark health` or `/spark profiler start --timeout 600` |
+| PerformanceAnalyzer 3.1+ | Read-only TPS, MSPT, GC and lag-incident diagnostics | Only a current release explicitly supporting 26.3 with a published SHA-256 is installed; older builds with entity cleaner or anti-cheat features are rejected |
+
+Research checked current offerings including LessLag, Let Me Despawn, ServerTune, ClearLag, entity optimizers, and Fabric-only optimization mods. Most either delete/merge items, change entity spawning or AI, throttle redstone or hoppers, or are incompatible with Paper. They are **intentionally excluded** to preserve survival mechanics.
 
 No additional heavy or gameplay-altering optimization plugins are automatically added. For only 3–5 players, Paper's built-in optimizations plus conservative view/simulation distances are usually preferable to stacking speculative plugins.
 
-Plugin state is stored in `server/plugins/plugins-state.json`; disable or enable a managed plugin from the dashboard, then restart safely. Other uploaded plugins remain supported. The Chunky job tracks its own progress in the saved server data. Chunk generation is intentionally limited and does not run while players are online. You can change its radius by setting the GitHub Actions repository **variable** `CHUNKY_PREGEN_RADIUS` to a number from 0 to 1024 (0 disables automatic pregeneration). The default is 512. If you want more terrain pre-generated, do it during an empty-server session rather than expanding the radius aggressively.
+Plugin state is stored in `server/plugins/plugins-state.json`; disable or enable a managed plugin from the dashboard, then restart safely. Other uploaded plugins remain supported. The Console page includes one-click read-only performance commands (`spark tps`, `spark health`, `perfstatus`, `perfincidents 5`). Monitoring records causes of lag; it does not automatically improve FPS/TPS. The Chunky job tracks its own progress in the saved server data. Chunk generation is intentionally limited and does not run while players are online. You can change its radius by setting the GitHub Actions repository **variable** `CHUNKY_PREGEN_RADIUS` to a number from 0 to 1024 (0 disables automatic pregeneration). The default is 512. If you want more terrain pre-generated, do it during an empty-server session rather than expanding the radius aggressively.
 
 ### Connect Bedrock players via Playit NetherNet
 
