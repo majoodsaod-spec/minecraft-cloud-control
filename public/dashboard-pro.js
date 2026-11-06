@@ -5,13 +5,19 @@ const CONSOLE_DRAFT="mccloud-console-draft";
 const FILE_DRAFT="mccloud-file-draft";
 let consoleSession="";
 let consoleHistory=[];
+let lastConsoleWindow=[];
 try {
   const saved=JSON.parse(sessionStorage.getItem(CONSOLE_STORE)||"null");
   if(saved && Array.isArray(saved.lines)){
     consoleSession=String(saved.session||"");
     consoleHistory=saved.lines.slice(-400).map(String);
+    lastConsoleWindow=Array.isArray(saved.window)?saved.window.map(String):[];
   }
 }catch{ /* Malformed or unavailable session storage is harmless. */ }
+function saveConsoleHistory(){
+  try{sessionStorage.setItem(CONSOLE_STORE,JSON.stringify({session:consoleSession,lines:consoleHistory,window:lastConsoleWindow}));}
+  catch{ /* Storage quota may be unavailable. */ }
+}
 function accumulateConsole(){
   const live=cloudState?.bridge?.status||{};
   const lines=Array.isArray(live.logs)?live.logs.map(String):[];
@@ -19,21 +25,21 @@ function accumulateConsole(){
   if(live.session && live.session!==consoleSession){
     if(consoleHistory.length)consoleHistory.push("— New server session —");
     consoleSession=live.session;
+    lastConsoleWindow=[];
   }
-  // The bridge sends a sliding window, so only append lines not already
-  // covered by the tail of the last batch. Repeated polling adds nothing.
-  const max=Math.min(consoleHistory.length,lines.length);
+  // Compare successive server windows, not the displayed history, because
+  // locally queued command receipts can appear between real server lines.
+  const max=Math.min(lastConsoleWindow.length,lines.length);
   let overlap=0;
   for(let count=max;count>0;count--){
-    if(lines.slice(0,count).every((line,i)=>consoleHistory[consoleHistory.length-count+i]===line)){
+    if(lines.slice(0,count).every((line,i)=>lastConsoleWindow[lastConsoleWindow.length-count+i]===line)){
       overlap=count;break;
     }
   }
-  if(!overlap && lines.length && consoleHistory.at(-1)===lines.at(-1))return;
   consoleHistory.push(...lines.slice(overlap));
   consoleHistory=consoleHistory.slice(-400);
-  try{sessionStorage.setItem(CONSOLE_STORE,JSON.stringify({session:consoleSession,lines:consoleHistory}));}
-  catch{ /* Storage quota may be unavailable. */ }
+  lastConsoleWindow=lines;
+  saveConsoleHistory();
 }
 const serverPhase = () => {
   if (!cloudState) return "disconnected";
@@ -229,7 +235,8 @@ consolePage=function(p){
     consoleBox.scrollTop=consoleBox.scrollHeight;
     try{
       const response=await cloudApi("live-command",{type:"console",args:{command:cmd}});
-      consoleHistory[consoleHistory.lastIndexOf(receipt)]="[You] /"+cmd+"  · queued for server";
+      const index=consoleHistory.lastIndexOf(receipt);
+      if(index>=0)consoleHistory[index]="[You] /"+cmd+"  · queued for server";
       toast("Command queued");
     }catch(error){
       const index=consoleHistory.lastIndexOf(receipt);
@@ -241,7 +248,7 @@ consolePage=function(p){
       send.disabled=!isBridgeLive();
       consoleBox.textContent=consoleHistory.join("\n");
       consoleBox.scrollTop=consoleBox.scrollHeight;
-      try{sessionStorage.setItem(CONSOLE_STORE,JSON.stringify({session:consoleSession,lines:consoleHistory}));}catch{}
+      saveConsoleHistory()
     }
   };
   const history=cloudState.bridge?.history||[];
