@@ -92,10 +92,11 @@ async function handleControl(request, env) {
     }
     if (request.method === "GET" && action === "status") {
       // A failure to list artifacts must not hide server controls or recent runs.
-      const [runsResult, artifactsResult, cfgResult] = await Promise.allSettled([
+      const [runsResult, artifactsResult, cfgResult, bedrockResult] = await Promise.allSettled([
         github(env, "/actions/workflows/" + workflow + "/runs?per_page=30"),
         github(env, "/actions/artifacts?name=minecraft-world&per_page=100"),
-        github(env, "/contents/server/server.properties")
+        github(env, "/contents/server/server.properties"),
+        github(env, "/contents/server/bedrock.json")
       ]);
       if (runsResult.status === "rejected") {
         throw new Error("Cannot read GitHub workflow runs. Check that GITHUB_TOKEN has Actions: Read and write access to the correct private repository. " + runsResult.reason.message);
@@ -103,6 +104,8 @@ async function handleControl(request, env) {
       const runs = runsResult.value;
       const artifacts = artifactsResult.status === "fulfilled" ? artifactsResult.value : {artifacts:[]};
       const cfg = cfgResult.status === "fulfilled" ? cfgResult.value : null;
+      const bedrockCfg = bedrockResult.status === "fulfilled" ? bedrockResult.value : null;
+      const bedrock=bedrockCfg ? JSON.parse(readText(bedrockCfg)) : {host:"",port:19132};
       const warnings = [];
       if (artifactsResult.status === "rejected") {
         warnings.push("Cannot list GitHub backup artifacts. Check token repository access and Actions permissions. " + artifactsResult.reason.message);
@@ -121,6 +124,7 @@ async function handleControl(request, env) {
         backups: artifacts.artifacts.filter(a=>!a.expired).slice(0,10).map(a=>({id:a.id,name:a.name,size_in_bytes:a.size_in_bytes,created_at:a.created_at,run_id:a.workflow_run?.id})),
         warnings,
         bridge,
+        bedrock:{host:bedrock.host||"",port:bedrock.port||19132,configured:!!bedrock.host},
         properties: cfg ? readText(cfg) : null});
     }
     if (request.method === "GET") return json({error:"Unknown action"},404);
@@ -171,6 +175,22 @@ async function handleControl(request, env) {
         content:encodeText(JSON.stringify(values,null,2)+"\n"),...(current?{sha:current.sha}:{})
       })});
       return json({ok:true,message:name+(enabled?" enabled":" disabled")+" for the next server start"});
+    }
+    if(action==="bedrock-address"){
+      const host=String(input.host||"").trim().toLowerCase();
+      const port=Number(input.port);
+      if(host && (host.length>253 || !/^[a-z0-9.-]+$/.test(host) || host.includes("..") || host.startsWith(".") || host.endsWith(".")))
+        return json({error:"Enter a valid public Bedrock server address, without a protocol or port"},400);
+      if(!Number.isSafeInteger(port)||port<1||port>65535)
+        return json({error:"Port must be 1–65535"},400);
+      const path="/contents/server/bedrock.json";
+      const current=await github(env,path).catch(error=>String(error).includes("GitHub 404:")?null:Promise.reject(error));
+      const next=JSON.stringify({host,port,note:"Public Bedrock tunnel address shown in Minecraft dashboard. Not a connectivity verification."},null,2)+"\n";
+      await github(env,path,{method:"PUT",body:JSON.stringify({
+        message:"Update Bedrock join address in server dashboard",branch:"main",
+        content:encodeText(next),...(current?{sha:current.sha}:{})
+      })});
+      return json({ok:true,message:host?"Bedrock address saved. Share only after testing your Playit tunnel.":"Bedrock address cleared."});
     }
     if (action === "restore") {
       const run=Number(input.run_id);
