@@ -6,6 +6,8 @@ Never includes the bridge token in console output.
 from __future__ import annotations
 from collections import deque
 from pathlib import Path
+import base64
+import binascii
 import json
 import os
 import re
@@ -15,7 +17,7 @@ import urllib.error
 import urllib.request
 
 USERNAME = re.compile(r"^[A-Za-z0-9_]{3,16}$")
-SAFE_PATH = re.compile(r"^[A-Za-z0-9_./ ()-]+$")
+SAFE_PATH = re.compile(r"^[A-Za-z0-9_./ ()+@,\\[\\]-]+$")
 TEXT_SUFFIXES = {".txt",".json",".yml",".yaml",".properties",".conf",".cfg",".toml",".log",".md"}
 MAX_FILE = 256 * 1024
 
@@ -81,10 +83,33 @@ class LiveBridge:
         resolved=(self.data/path).resolve()
         if not resolved.is_relative_to(self.data):
             raise ValueError("File escapes server directory")
-        if write and (relative.startswith(("world/","world_nether/","world_the_end/")) or
-                      resolved.suffix.lower() not in TEXT_SUFFIXES or resolved.name in ("eula.txt","ops.json","banned-players.json")):
-            raise ValueError("Live write forbidden for world data, binary files and protected permissions")
+        # Never expose authentication material, private player data or secret
+        # runtime files to a browser, even if a dashboard password is compromised.
+        parts={part.lower() for part in path.parts}
+        if any(p.startswith(".") for p in path.parts) or resolved.name.lower() in (
+            "key.pem","usercache.json","ops.json","whitelist.json",
+            "banned-players.json","banned-ips.json","eula.txt",
+            "credentials.json","secrets.json"
+        ) or (
+            "geyser-spigot" in parts and resolved.name.lower()=="config.yml"
+        ):
+            raise ValueError("This file is protected")
+        if write and (any(part in ("world","world_nether","world_the_end") or part.startswith("world_")
+                          for part in path.parts) or
+                      "playerdata" in parts or "stats" in parts or
+                      "advancements" in parts or
+                      path.parts[0] in ("plugins",) and resolved.suffix.lower()==".jar" or
+                      resolved.name.lower()=="server.properties"):
+            raise ValueError("This file is protected. Use Server Settings for server.properties.")
         return resolved
+
+    def _file_entry(self, path):
+        stat=path.stat()
+        relative=path.relative_to(self.data).as_posix()
+        return {"name":path.name,"path":relative,
+                "type":"dir" if path.is_dir() else "file",
+                "size":stat.st_size if path.is_file() else None,
+                "modified":int(stat.st_mtime*1000)}
 
     def _execute(self, item):
         kind=item.get("type","")
@@ -124,24 +149,73 @@ class LiveBridge:
         if kind=="plugins-list":
             return [{"name":p.name,"bytes":p.stat().st_size} for p in (self.data/"plugins").glob("*.jar")][:100]
         if kind=="files-list":
-            base=self._path(args.get("path",".")) if args.get("path") not in (None,"","." ) else self.data
+            relative=args.get("path","")
+            base=self.data if relative in (None,"",".") else self._path(relative)
             if not base.is_dir():raise ValueError("Directory not found")
-            return [{"name":p.name,"path":p.relative_to(self.data).as_posix(),
-                    "type":"dir" if p.is_dir() else "file","size":p.stat().st_size if p.is_file() else None}
-                    for p in sorted(base.iterdir(),key=lambda x:(not x.is_dir(),x.name.lower()))[:150]
-                    if not p.is_symlink()]
+            entries=[]
+            for path in sorted(base.iterdir(),key=lambda x:(not x.is_dir(),x.name.lower())):
+                if path.is_symlink():continue
+                try:
+                    self._path(path.relative_to(self.data).as_posix())
+                    if path.is_file() or path.is_dir():
+                        entries.append(self._file_entry(path))
+                except (ValueError,OSError):
+                    continue
+                if len(entries)>=500:break
+            return {"path":relative or "","entries":entries,"truncated":len(entries)>=500}
+        if kind=="files-mkdir":
+            path=self._path(args.get("path",""),write=True)
+            if path.exists():raise ValueError("That name is already in use")
+            if not path.parent.is_dir():raise ValueError("Parent folder not found")
+            path.mkdir()
+            return "Folder created; included in next verified backup"
+        if kind=="files-rename":
+            source=self._path(args.get("path",""),write=True)
+            target=self._path(args.get("target",""),write=True)
+            if not source.exists() or source.is_symlink():raise ValueError("Source not found")
+            if target.exists() or target.parent!=source.parent:raise ValueError("Rename must stay in the same folder and not overwrite")
+            if source.is_dir() and ("world" in source.parts or source.name=="plugins"):
+                raise ValueError("Cannot rename protected server folders")
+            source.rename(target)
+            return "Renamed successfully; change saved in next backup"
+        if kind=="files-download":
+            path=self._path(args.get("path",""))
+            if not path.is_file():raise ValueError("File not found")
+            if path.stat().st_size>MAX_FILE:raise ValueError("Download exceeds 256 KiB live-transfer limit")
+            return {"path":args["path"],"encoding":"base64",
+                    "content":base64.b64encode(path.read_bytes()).decode("ascii")}
+        if kind=="files-upload":
+            path=self._path(args.get("path",""),write=True)
+            if path.suffix.lower() not in TEXT_SUFFIXES:
+                raise ValueError("Upload limited to small configuration and text files")
+            raw=args.get("content")
+            if not isinstance(raw,str) or len(raw)>350000:raise ValueError("Upload too large")
+            try:
+                content=base64.b64decode(raw,validate=True)
+            except (ValueError,binascii.Error):
+                raise ValueError("Invalid upload encoding")
+            if len(content)>MAX_FILE:raise ValueError("Upload exceeds 256 KiB limit")
+            try:
+                content.decode("utf-8")
+            except UnicodeDecodeError:
+                raise ValueError("Only UTF-8 text uploads are accepted")
+            if not path.parent.is_dir():raise ValueError("Destination folder not found")
+            if path.is_dir():raise ValueError("A folder already uses that name")
+            path.write_bytes(content)
+            return "Uploaded successfully; saved in next verified backup"
         if kind in ("files-read","files-write","files-delete"):
             relative=args.get("path","")
             path=self._path(relative,write=kind!="files-read")
-            if path.suffix.lower() not in TEXT_SUFFIXES:raise ValueError("Only small text files are supported")
+            if path.suffix.lower() not in TEXT_SUFFIXES:raise ValueError("Only small text files can be edited")
             if kind=="files-read":
                 if not path.is_file():raise ValueError("File not found")
-                if path.stat().st_size>MAX_FILE:raise ValueError("File too large")
+                if path.stat().st_size>MAX_FILE:raise ValueError("File too large for live text editor")
                 return {"path":relative,"content":path.read_text(encoding="utf-8")}
             if kind=="files-write":
                 value=args.get("content")
-                if not isinstance(value,str) or len(value.encode())>MAX_FILE:raise ValueError("Content must be text <=256 KiB")
-                path.parent.mkdir(parents=True,exist_ok=True)
+                if not isinstance(value,str) or len(value.encode())>MAX_FILE:raise ValueError("Content must be UTF-8 text, up to 256 KiB")
+                if not path.parent.is_dir():raise ValueError("Destination folder not found")
+                if path.is_dir():raise ValueError("Cannot overwrite a folder")
                 path.write_text(value,encoding="utf-8")
                 return "Saved to runner filesystem; included in next verified backup"
             if not path.is_file():raise ValueError("File not found")
