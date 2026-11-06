@@ -81,3 +81,38 @@ Test before putting valuable worlds on the server. Never place tokens in browser
 ## Automatic checks
 
 The `Dashboard checks` workflow validates Python syntax, runs bridge and policy tests, and checks browser/Worker JavaScript syntax after relevant code changes. Passing these tests does not substitute for an actual Cloudflare deployment and end-to-end Paper backup/restore test.
+
+
+## Managed survival plugins and Bedrock cross-play
+
+The server automatically installs the following **maintained** plugins from official release endpoints at startup; binary files are deliberately not committed to GitHub:
+
+| Plugin | Purpose | How it is handled |
+| --- | --- | --- |
+| EssentialsX 2.22.0 | Homes, teleport requests, messaging and common survival utilities | Pinned release and verified SHA-256; adds commands, but does not change terrain or vanilla mechanics |
+| Chunky | Pregenerate chunks to reduce world-exploration lag | Only generates a **512-block-radius area around (0, 0)** while no players are online; pauses as soon as anyone joins and before every shutdown; automatically resumes saved progress during later quiet periods |
+| Geyser-Spigot | Minecraft Bedrock/Java compatibility | Current official build on each server start, Bedrock NetherNet transport on local port 19132 |
+| Floodgate | Let authenticated Bedrock users join without Java Edition accounts | Official build, with Geyser set to `auth-type: floodgate` |
+| spark | Built-in Paper profiler | Paper already bundles spark; no duplicate JAR is installed. Use `/spark health` or `/spark profiler start --timeout 600` |
+
+No additional heavy or gameplay-altering optimization plugins are automatically added. For only 3–5 players, Paper's built-in optimizations plus conservative view/simulation distances are usually preferable to stacking speculative plugins.
+
+Plugin state is stored in `server/plugins/plugins-state.json`; disable or enable a managed plugin from the dashboard, then restart safely. Other uploaded plugins remain supported. The Chunky job tracks its own progress in the saved server data. Chunk generation is intentionally limited and does not run while players are online. You can change its radius by setting the GitHub Actions repository **variable** `CHUNKY_PREGEN_RADIUS` to a number from 0 to 1024 (0 disables automatic pregeneration). The default is 512. If you want more terrain pre-generated, do it during an empty-server session rather than expanding the radius aggressively.
+
+### Connect Bedrock players via Playit NetherNet
+
+**A separate Playit Bedrock (NetherNet) tunnel is required.** A Java-only Playit tunnel does not make the Bedrock port accessible. Geyser's local port 19132 is not automatically your public join address.
+
+1. In your Playit account, keep the existing **Minecraft Java** tunnel for Java players.
+2. Add a second tunnel with type **Minecraft Bedrock (NetherNet)** (not the old Minecraft Bedrock/RakNet type) on the same running Playit agent.
+3. Open that new tunnel's **Configuration help → Geyser → Copy**. The copied YAML includes a **private signaling token**. Never paste it into chat, dashboard public fields, source code or screenshots.
+4. In GitHub → Repository Settings → Secrets and variables → Actions, create the **repository secret** `GEYSER_PLAYIT_CONFIG`, and paste the complete copied YAML snippet exactly as provided, including its `bedrock:` section.
+5. After a **safe restart**, the runtime merges this secret into Geyser's generated config. It enforces `transport: nethernet`, internal port `19132`, and Floodgate authentication. The private signaling token is not committed to the repository.
+6. In your Minecraft dashboard → **Connections → Bedrock Edition**, enter the public hostname and port shown in your Playit Bedrock tunnel (usually 19132 for NetherNet), then save. This is what will appear on the Overview panel.
+7. Test from Minecraft Bedrock → Play → Servers → Add Server, using the **actual host and port** you entered. Watch the server console for Geyser's successful signaling registration.
+
+The dashboard does not invent an IP or claim an untested tunnel is online. A saved host/port is display information; the live tunnel must still be created in Playit and verified from a Bedrock client.
+
+**Security:** Because the repository is public, the server explicitly excludes the sensitive Geyser config and Floodgate key from world archives. Their credentials are re-created or injected at startup. If you've ever committed these secrets or saved older backups containing them, rotate them. Other world data remains in verified backup archives.
+
+References: [Geyser setup](https://geysermc.org/wiki/geyser/setup/), [Floodgate setup](https://geysermc.org/wiki/floodgate/setup/), [Playit NetherNet setup](https://playit.gg/support/use-geyser-on-fabric/), [Chunky commands](https://github.com/pop4959/Chunky/wiki/Commands), [Paper spark](https://docs.papermc.io/paper/profiling/).
