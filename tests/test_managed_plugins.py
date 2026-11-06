@@ -73,6 +73,28 @@ class PluginInstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,"No verified"):
                 managed_plugins.analyzer_build()
 
+    def test_lmd_requires_paper_263_verified_release(self):
+        versions = [
+            {"version_number":"1.26.11.1","version_type":"release","game_versions":["26.3"],
+             "loaders":["fabric"],"files":[{"filename":"fabric.jar","url":"https://cdn.example/fabric.jar",
+                                             "hashes":{"sha256":"a"*64}}]},
+            {"version_number":"1.26.10.3","version_type":"release","game_versions":["26.3"],
+             "loaders":["paper","bukkit"],"files":[{"filename":"LetMeDespawn-1.26.10.3.jar",
+                         "url":"https://cdn.example/LetMeDespawn-1.26.10.3.jar",
+                         "hashes":{"sha256":"b"*64}}]}
+        ]
+        with patch.object(managed_plugins,"fetch_json",return_value=versions):
+            self.assertEqual(managed_plugins.let_me_despawn_build(),
+                             ("https://cdn.example/LetMeDespawn-1.26.10.3.jar","b"*64))
+
+    def test_lmd_never_accepts_fabric_jar_or_unverified_file(self):
+        versions=[{"version_number":"1.26.10.3","version_type":"release","game_versions":["26.3"],
+                   "loaders":["fabric"],"files":[{"filename":"fabric.jar","url":"https://cdn.example/fabric.jar",
+                                                 "hashes":{"sha256":"a"*64}}]}]
+        with patch.object(managed_plugins,"fetch_json",return_value=versions):
+            with self.assertRaisesRegex(RuntimeError,"No verified"):
+                managed_plugins.let_me_despawn_build()
+
     def test_geyser_floodgate_auth_and_secret_overlay(self):
         folder=self.root/"plugins"
         folder.mkdir()
