@@ -133,6 +133,25 @@ function updateLiveMetrics(){
     if(node&&node.textContent!==value)node.textContent=value;
   }
 }
+function javaJoinPanel(p){
+  const java=cloudState?.java||{host:""};
+  const panel=proPanel(p,"Java Edition · Connect");
+  proNode(panel,"p","muted small","Share this Playit address with Minecraft Java Edition players.");
+  const grid=proNode(panel,"div","server-metrics");
+  const host=proNode(grid,"div","panel server-stat");
+  proNode(host,"div","server-stat-label","Java server address");
+  proNode(host,"strong","server-stat-value",java.host||"Not configured");
+  const note=proNode(grid,"div","panel server-stat");
+  proNode(note,"div","server-stat-label","Connection");
+  proNode(note,"strong","server-stat-value",java.host?"Address saved":"Not configured");
+  proNode(note,"div","muted small","Reachability is not verified");
+  const actions=proNode(panel,"div","dashboard-actions");
+  actions.append(proAction("Copy Java address",async()=>{
+    try{await navigator.clipboard.writeText(java.host);toast("Java address copied");}
+    catch{window.prompt("Copy Java server address",java.host);}
+  },"outline",!java.host));
+  return panel;
+}
 function bedrockPanel(p, editable=false){
   const bedrock=cloudState?.bedrock||{host:"",port:19132};
   const panel=proPanel(p,"Bedrock Edition · Cross-play");
@@ -226,6 +245,7 @@ overview=function(p){
   for(const [label,id] of [["Server settings","settings"],["Online players","players"],["Live console","console"],["World backups","worlds"],["Files","files"],["Plugins","plugins"]]){
     links.append(proAction(label,()=>{tab=id;render()}));
   }
+  javaJoinPanel(p);
   bedrockPanel(p);
   if(cloudState.warnings?.length)cloudState.warnings.forEach(w=>proNotice(p,w));
   if(cloudError)proNotice(p,"Status refresh failed; showing last known data: "+cloudError);
@@ -714,6 +734,7 @@ aboutPage=function(p){
     const row=proNode(panel,"div","rowsetting");
     proNode(row,"strong","",k);proNode(row,"span","muted small",v);
   }
+  javaJoinPanel(p);
   bedrockPanel(p,true);
   panel.append(proAction("Disconnect dashboard",()=>{
     cloudPassword="";cloudState=null;sessionStorage.removeItem("mccloud-admin");render();
