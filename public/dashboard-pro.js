@@ -413,6 +413,7 @@ async function fileLoadTree(){
     if(tab==="files")render();
   }catch(error){
     fileManager.error="Could not load server folder tree: "+error.message;
+    fileManager.tree=[]; // Avoid automatic retry loops; Refresh retries explicitly.
   }finally{
     fileManager.treeLoading=false;
     if(tab==="files")render();
@@ -471,7 +472,11 @@ filesPage=function(p){
   const toolbar=proNode(panel,"div","dashboard-actions file-toolbar");
   toolbar.append(proAction("⌂ Root",()=>fileOpenFolder(""),"outline",!live||fm.busy));
   toolbar.append(proAction("↑ Up",()=>fileOpenFolder(fm.folder.split("/").slice(0,-1).join("/")),"outline",!live||fm.busy||!fm.folder));
-  toolbar.append(proAction("⟳ Refresh",()=>fileRefresh(),"outline",!live||fm.busy));
+  toolbar.append(proAction("⟳ Refresh",async()=>{
+    fm.tree=null;
+    await fileLoadTree();
+    await fileRefresh();
+  },"outline",!live||fm.busy));
   toolbar.append(proAction("+ New folder",async()=>{
     const name=prompt("New folder name (inside "+(fm.folder||"server root")+"):");
     if(!name)return;
