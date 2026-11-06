@@ -69,6 +69,9 @@ async function handleControl(request, env) {
   const url = new URL(request.url);
   const action = url.searchParams.get("action") || "status";
   try {
+    if (request.method === "GET" && action === "live") {
+      return json({bridge:await bridgeCall(env,"state")});
+    }
     if (request.method === "GET" && action === "status") {
       // A failure to list artifacts must not hide server controls or recent runs.
       const [runsResult, artifactsResult, cfgResult] = await Promise.allSettled([
