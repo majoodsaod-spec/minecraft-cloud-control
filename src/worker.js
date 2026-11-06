@@ -108,8 +108,8 @@ async function handleControl(request, env) {
       const name=input.name,content=input.content;
       if(typeof name!=="string"||!/^[a-zA-Z0-9_.-]{1,80}\.jar$/.test(name)||name.startsWith("."))
         return json({error:"Invalid plugin filename"},400);
-      if(typeof content!=="string"||content.length>900000||!/^[A-Za-z0-9+/]*={0,2}$/.test(content))
-        return json({error:"Plugin JAR too large (maximum 650 KiB per upload) or invalid"},400);
+      if(typeof content!=="string"||content.length>7000000||!/^[A-Za-z0-9+/]*={0,2}$/.test(content))
+        return json({error:"Plugin JAR too large (maximum 5 MiB per upload) or invalid"},400);
       const path="/contents/server/plugins/"+encodeURIComponent(name);
       const existing=await github(env,path).catch(err=>String(err).includes("GitHub 404:")?null:Promise.reject(err));
       await github(env,path,{method:"PUT",body:JSON.stringify({branch:"main",message:"Stage Paper plugin "+name+" from Minecraft Cloud",content,...(existing?{sha:existing.sha}:{})})});
@@ -125,7 +125,24 @@ async function handleControl(request, env) {
     }
     if(action==="plugin-list") {
       const listing=await github(env,"/contents/server/plugins").catch(err=>String(err).includes("GitHub 404:")?[]:Promise.reject(err));
-      return json({plugins:Array.isArray(listing)?listing.filter(x=>x.type==="file"&&x.name.endsWith(".jar")).map(x=>({name:x.name,size:x.size})):[]});
+      const stored=await github(env,"/contents/server/plugins/plugins-state.json").catch(err=>String(err).includes("GitHub 404:")?null:Promise.reject(err));
+      const enabled=stored?JSON.parse(readText(stored)):{};
+      return json({plugins:Array.isArray(listing)?listing.filter(x=>x.type==="file"&&x.name.endsWith(".jar")).map(x=>({name:x.name,size:x.size,enabled:enabled[x.name]!==false})):[]});
+    }
+    if(action==="plugin-toggle") {
+      const name=input.name,enabled=input.enabled;
+      if(typeof name!=="string"||!/^[A-Za-z0-9_.-]{1,80}\.jar$/.test(name)||typeof enabled!=="boolean")
+        return json({error:"Invalid plugin settings"},400);
+      await github(env,"/contents/server/plugins/"+encodeURIComponent(name));
+      const file="server/plugins/plugins-state.json";
+      const current=await github(env,"/contents/"+file).catch(err=>String(err).includes("GitHub 404:")?null:Promise.reject(err));
+      const values=current?JSON.parse(readText(current)):{};
+      values[name]=enabled;
+      await github(env,"/contents/"+file,{method:"PUT",body:JSON.stringify({
+        branch:"main",message:(enabled?"Enable ":"Disable ")+name+" on next startup",
+        content:encodeText(JSON.stringify(values,null,2)+"\\n"),...(current?{sha:current.sha}:{})
+      })});
+      return json({ok:true,message:name+(enabled?" enabled":" disabled")+" for the next server start"});
     }
     if (action === "restore") {
       const run=Number(input.run_id);
