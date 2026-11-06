@@ -364,7 +364,7 @@ cloudRefresh=async function(notify=false){
     const consoleBox=document.querySelector(".pro-console");
     if(consoleBox){
       const nearEnd=consoleBox.scrollHeight-consoleBox.scrollTop-consoleBox.clientHeight<50;
-      consoleBox.textContent=(cloudState.bridge?.status?.logs||[]).join("\\n")||"No live output yet.";
+      consoleBox.textContent=(cloudState.bridge?.status?.logs||[]).join("\n")||"No live output yet.";
       if(nearEnd)consoleBox.scrollTop=consoleBox.scrollHeight;
     }
     const list=document.getElementById("recent-command-results");
