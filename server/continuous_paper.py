@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ import urllib.request
 import zipfile
 
 from paper_lifecycle import DATA, OUTPUT, PREV, WORK, CONFIG, SKIP_NAMES, SKIP_FILES, digest, download_paper
+from runtime_bridge import LiveBridge
 
 IDLE_SECONDS = 3600
 MAX_SECONDS = 5 * 3600 + 30 * 60
@@ -100,7 +102,22 @@ def set_properties() -> None:
     path.write_text("".join(f"{k}={v}\n" for k, v in current.items()))
 
 
+def synchronize_plugins() -> None:
+    """Persist plugin settings via snapshot; plugin JAR versions via Git."""
+    repo_plugins = WORK.parent / "server" / "plugins"
+    installed = DATA / "plugins"
+    installed.mkdir(parents=True, exist_ok=True)
+    source = {p.name: p for p in repo_plugins.glob("*.jar")} if repo_plugins.exists() else {}
+    for old in installed.glob("*.jar"):
+        if old.name not in source:
+            old.unlink()
+    for name, jar in source.items():
+        shutil.copyfile(jar, installed / name)
+    print(f"Configured {len(source)} Paper plugin JARs", flush=True)
+
+
 def run(jar: Path) -> None:
+    synchronize_plugins()
     set_properties()
     proc = subprocess.Popen(
         ["java", "-Xms512M", "-Xmx3G", "-jar", str(jar), "--nogui"],
@@ -110,6 +127,8 @@ def run(jar: Path) -> None:
     ready = threading.Event()
     lock = threading.Lock()
     players = set()
+    log_lines = deque(maxlen=100)
+    bridge_restart = threading.Event()
     observed = {"last_join": time.monotonic(), "count": 0}
     def send(cmd: str) -> None:
         if proc.poll() is None:
@@ -120,6 +139,8 @@ def run(jar: Path) -> None:
         assert proc.stdout is not None
         for line in proc.stdout:
             print(line, end="", flush=True)
+            with lock:
+                log_lines.append(line.rstrip()[:400])
             if "Done (" in line and "For help" in line:
                 ready.set()
             joined = JOIN.search(line)
@@ -138,6 +159,9 @@ def run(jar: Path) -> None:
         STOPPED.set()
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
+    bridge=LiveBridge(DATA,os.environ.get("GITHUB_RUN_ID",str(int(time.time()))),
+                      players,lock,log_lines,ready,send,bridge_restart)
+    bridge.start()
     graceful = False
     try:
         if not ready.wait(180) or proc.poll() is not None:
@@ -155,6 +179,9 @@ def run(jar: Path) -> None:
                 if remaining <= mark and mark not in warned and remaining > 0:
                     warned.add(mark)
                     send(f"say Server will restart in {mark} seconds. Please join again shortly.")
+            if bridge_restart.is_set():
+                print("Cloudflare requested safe restart",flush=True)
+                break
             if elapsed >= MAX_SECONDS:
                 print("Scheduled 5h30m handoff", flush=True)
                 break
