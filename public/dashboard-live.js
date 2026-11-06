@@ -56,7 +56,7 @@ async function cloudAction(action, data, promptText) {
 }
 function cloudUnlock(parent) {
   const box=element("div","panel section");
-  box.innerHTML='<h2>Connect Cloudflare controls</h2><p class="muted small">Enter the admin password configured in Cloudflare Pages. The password stays in this browser tab. GitHub credentials stay on the Cloudflare backend.</p>';
+  box.innerHTML='<div class="dashboard-kicker">SECURE CONNECTION</div><h2>Connect Minecraft Cloud</h2><p class="muted small">Enter the administrator password from your Cloudflare Worker secrets. GitHub credentials remain on the backend, not in your browser.</p>';
   const input=element("input"); input.type="password"; input.autocomplete="off"; input.placeholder="Cloudflare admin password";
   const btn=button("Connect",async()=>{
     cloudPassword=input.value;
@@ -69,7 +69,7 @@ function cloudUnlock(parent) {
   const form=element("form","connect-form");
   input.autocomplete="current-password";
   form.append(input,btn);
-  btn.type="submit";
+  btn.type="button";
   form.onsubmit=e=>{e.preventDefault();btn.click()};
   box.append(form);
   if(cloudError) box.append(element("p","notice",cloudError));
@@ -77,7 +77,7 @@ function cloudUnlock(parent) {
 }
 const previewOverview=overview;
 overview=function(p){
-  if(!cloudState){previewOverview(p);cloudUnlock(p);return}
+  if(!cloudState){cloudUnlock(p);return}
   const active=cloudState.active;
   const hero=element("div","dashboard-hero");
   const heroText=element("div");
@@ -120,8 +120,8 @@ overview=function(p){
 };
 const previewSettings=settingsPage;
 settingsPage=function(p){
-  previewSettings(p);
   if(!cloudState){cloudUnlock(p);return}
+  previewSettings(p);
   const section=element("div","panel section");
   section.append(element("h2","","Apply settings to GitHub"));
   addNotice(section,"Only supported server.properties settings are sent. Paper-specific placeholders, plugins, and files are not uploaded. Changes take effect when the next Paper session starts.");
