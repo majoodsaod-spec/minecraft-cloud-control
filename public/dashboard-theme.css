@@ -45,3 +45,36 @@ body { background: radial-gradient(ellipse 1000px 550px at 100% -20%,rgba(31,123
 @media(max-width:960px){.status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.status-grid{grid-template-columns:1fr}.dashboard-hero{padding:19px}.dashboard-hero h2{font-size:19px}.run-entry{align-items:flex-start}.dashboard-actions .btn{width:100%}}
 @media(prefers-reduced-motion:reduce){.pulse{animation:none}.btn{transition:none}}
+
+/* Professional server-first visual layer */
+.server-overview{position:relative;overflow:hidden;border:1px solid #355864;background:linear-gradient(120deg,#142e32 0%,#142539 62%,#152035 100%);padding:30px;border-radius:20px;margin-bottom:17px;box-shadow:0 12px 45px rgba(0,0,0,.08);animation:serverEnter .4s ease-out both}
+.server-overview::after{content:"";position:absolute;width:280px;height:280px;border-radius:50%;right:-110px;top:-170px;background:radial-gradient(circle,rgba(78,215,162,.11),transparent 70%);pointer-events:none}
+.server-header{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}
+.server-title{font-size:clamp(30px,3.5vw,42px);letter-spacing:-1.3px;margin:4px 0}
+.server-state{display:flex;align-items:center;gap:10px;padding:10px 17px;background:#172637;border:1px solid #3c5162;border-radius:99px;font-weight:800;font-size:13px}
+.server-state::before{content:"";width:10px;height:10px;border-radius:50%;background:#8497ab}
+.server-state.good{border-color:#377f66;color:#a6eac7}
+.server-state.good::before{background:#44dba3;box-shadow:0 0 0 5px rgba(68,219,163,.14);animation:serverPulse 2.5s infinite}
+.server-state.waiting::before{background:#edb958;animation:serverPulse 1.8s infinite}
+.server-progress{height:8px;border-radius:99px;background:rgba(255,255,255,.08);margin-top:26px;overflow:hidden}
+.server-progress-fill{height:100%;border-radius:inherit;background:linear-gradient(90deg,#27ba89,#72eac5);transition:width 1.1s cubic-bezier(.19,1,.22,1)}
+.server-progress-fill.progress-flow{background-size:200% 100%;background-image:linear-gradient(90deg,#267f69,#4ecda9,#267f69);animation:progressFlow 2.2s linear infinite}
+.stage-line{display:flex;gap:12px;align-items:center;margin-top:17px;flex-wrap:wrap}
+.stage-step{font-size:12px;color:#8b9eaf;font-weight:700;transition:color .3s ease}
+.stage-step.reached{color:#8fefd0}
+.stage-separator{color:#617687}
+.server-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.server-stat{padding:22px;min-height:130px;animation:serverEnter .45s ease-out both}
+.server-stat-label{font-size:12px;color:#94a9bd;font-weight:750;letter-spacing:.25px}
+.server-stat-value{display:block;font-size:clamp(20px,2vw,28px);font-variant-numeric:tabular-nums;letter-spacing:-.5px;margin:12px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pro-console{max-height:440px;overflow:auto;margin:16px 0 12px;line-height:1.6}
+.console-command-row{display:flex;gap:10px}
+.console-command-row input{flex:1;min-width:0}
+.console-command-row button{min-width:95px}
+.backup-row .btn{flex-shrink:0}
+@keyframes serverEnter{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:translateY(0)}}
+@keyframes serverPulse{0%,100%{box-shadow:0 0 0 0 rgba(77,210,157,.24)}50%{box-shadow:0 0 0 6px rgba(77,210,157,0)}}
+@keyframes progressFlow{0%{background-position:200% center}100%{background-position:0 center}}
+@media(max-width:900px){.server-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.server-metrics{grid-template-columns:1fr}.server-overview{padding:20px}.server-header{align-items:flex-start}.console-command-row{flex-direction:column}.server-stat{min-height:110px}}
+@media(prefers-reduced-motion:reduce){.server-overview,.server-stat{animation:none}.server-state.good::before,.server-state.waiting::before,.server-progress-fill.progress-flow{animation:none}}
