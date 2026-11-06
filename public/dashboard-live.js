@@ -2,6 +2,10 @@
 // Browser stores the admin password only for the current tab. GitHub token stays in Cloudflare.
 let cloudPassword = sessionStorage.getItem("mccloud-admin") || "";
 let cloudState = null;
+let cloudLastUpdate = 0;
+let cloudRefreshing = false;
+let cloudBusy = false;
+let cloudError = "";
 async function cloudApi(action, payload) {
   const response = await fetch("/api/control?action=" + encodeURIComponent(action), {
     method: payload ? "POST" : "GET",
@@ -14,26 +18,41 @@ async function cloudApi(action, payload) {
   return data;
 }
 async function cloudRefresh(showToast=false) {
+  if(!cloudPassword || cloudRefreshing)return;
+  cloudRefreshing=true;
   try {
-    cloudState=await cloudApi("status");
+    const fresh=await cloudApi("status");
+    cloudState=fresh;
+    cloudLastUpdate=Date.now();
+    cloudError="";
     const badge=document.querySelector(".top .badge");
     if(badge) badge.innerHTML='<span class="dot"></span> '+(cloudState.active.length?"Workflow running":"Connected to GitHub");
     const foot=document.querySelector(".navfoot");
     if(foot) foot.textContent="Cloudflare ↔ GitHub controls enabled";
     if(showToast) toast("Latest GitHub status loaded");
-    render();
+    if(["overview","worlds","about","players","console"].includes(tab)) render();
   } catch(e) {
-    cloudState=null;
+    cloudError=e.message;
+    if(/Unauthorized|not configured/i.test(e.message)){
+      cloudState=null;
+      cloudPassword="";
+      sessionStorage.removeItem("mccloud-admin");
+    }
     if(showToast) toast(e.message);
+    if(["overview","worlds","about"].includes(tab))render();
+  } finally {
+    cloudRefreshing=false;
   }
 }
 async function cloudAction(action, data, promptText) {
-  if(promptText && !confirm(promptText))return;
+  if(cloudBusy || (promptText && !confirm(promptText)))return;
+  cloudBusy=true;
   try {
     const result=await cloudApi(action,data);
     toast(result.message||"Request accepted");
     await cloudRefresh();
   } catch(e) {toast(e.message)}
+  finally {cloudBusy=false}
 }
 function cloudUnlock(parent) {
   const box=element("div","panel section");
@@ -47,17 +66,33 @@ function cloudUnlock(parent) {
       toast("Dashboard connected");render();
     }catch(e){cloudPassword="";toast(e.message)}
   },"primary");
-  box.append(input,btn);parent.prepend(box);
+  const form=element("form","connect-form");
+  input.autocomplete="current-password";
+  form.append(input,btn);
+  btn.type="submit";
+  form.onsubmit=e=>{e.preventDefault();btn.click()};
+  box.append(form);
+  if(cloudError) box.append(element("p","notice",cloudError));
+  parent.prepend(box);
 }
 const previewOverview=overview;
 overview=function(p){
   if(!cloudState){previewOverview(p);cloudUnlock(p);return}
   const active=cloudState.active;
-  const cards=element("div","grid two");
+  const hero=element("div","dashboard-hero");
+  const heroText=element("div");
+  heroText.append(element("div","dashboard-kicker","PAPER 26.3 · JAVA 25 · GITHUB ACTIONS"));
+  heroText.append(element("h2","",active.length?"Minecraft workflow active":"Minecraft workflow stopped"));
+  heroText.append(element("p","muted small",active.length?"The runner is queued or running; Paper readiness is shown in GitHub logs.":"Start a new workflow to restore the newest world and launch Paper."));
+  hero.append(heroText);
+  hero.append(element("span","status-label "+(active.length?"good":"waiting"),active.length?"Workflow active":"Not running"));
+  p.append(hero);
+  const cards=element("div","status-grid");
   for(const [key,value] of [["GitHub Workflow",active.length?"Running / queued":"Stopped"],["Backups kept",String(cloudState.backups.length)],["Paper version","26.3"],["Runtime","GitHub Actions"]]){
     const c=element("div","panel stat");c.append(element("span","",key),element("b","",value));cards.append(c)
   }
   p.append(cards);
+  if(cloudError)addNotice(p,"Last refresh failed: "+cloudError+" — showing the last known status.");
   if(cloudState.warnings && cloudState.warnings.length) {
     for(const warning of cloudState.warnings) addNotice(p, warning);
   }
@@ -65,7 +100,9 @@ overview=function(p){
   section.append(element("h2","","Server control"));
   addNotice(section,"Start and Stop control GitHub Actions, not the live Minecraft console. Cancelling a run can lose progress since its last verified backup. Settings apply on a new server session.");
   const actions=element("div","flex");
-  actions.append(button("▶ Start",()=>cloudAction("start",{},"Start a new Minecraft server workflow?"),"primary"));
+  const startBtn=button("▶ Start",()=>cloudAction("start",{},"Start a new Minecraft server workflow?"),"primary");
+  startBtn.disabled=active.length>0;
+  actions.append(startBtn);
   for(const r of active) {
     actions.append(button("■ Stop run "+r.id,()=>cloudAction("stop",{run_id:r.id},"Cancel this run? Progress since its last successful backup may be lost."),"danger"));
   }
@@ -79,6 +116,7 @@ overview=function(p){
     link.href=cloudState.latest.html_url;link.target="_blank";link.rel="noopener noreferrer";section.append(link)
   }
   p.append(section);
+  p.append(element("p","dashboard-meta","Last checked: "+(cloudLastUpdate?new Date(cloudLastUpdate).toLocaleTimeString():"not yet")+" · Automatic refresh every 30 seconds while this tab is open."));
 };
 const previewSettings=settingsPage;
 settingsPage=function(p){
@@ -87,6 +125,22 @@ settingsPage=function(p){
   const section=element("div","panel section");
   section.append(element("h2","","Apply settings to GitHub"));
   addNotice(section,"Only supported server.properties settings are sent. Paper-specific placeholders, plugins, and files are not uploaded. Changes take effect when the next Paper session starts.");
+  const load=button("Load saved server settings",()=>{
+    if(!cloudState.properties){toast("No server.properties stored in GitHub yet");return}
+    for(const line of cloudState.properties.split(/\r?\n/)){
+      const i=line.indexOf("=");
+      if(i<1||line.startsWith("#"))continue;
+      const key=line.slice(0,i),val=line.slice(i+1);
+      const spec=schema.find(x=>x[0]===key);
+      if(!spec)continue;
+      if(spec[3]==="bool")settings[key]=val==="true";
+      else if(spec[3]==="number") {if(Number.isFinite(+val))settings[key]=Number(val)}
+      else settings[key]=val;
+    }
+    persist();render();toast("Loaded GitHub settings");
+  },"outline");
+  load.disabled=!cloudState.properties;
+  section.append(load);
   section.append(button("Save supported settings to server",()=>{
     const allowed=["motd","max-players","difficulty","gamemode","pvp","allow-flight","white-list","enforce-whitelist","online-mode","enable-command-block","spawn-protection","view-distance","simulation-distance","max-world-size","allow-nether","spawn-monsters","spawn-animals","spawn-npcs","hardcore","force-gamemode","player-idle-timeout"];
     const data=Object.fromEntries(allowed.map(k=>[k,settings[k]]));
@@ -123,3 +177,9 @@ aboutPage=function(p){
 };
 render();
 if(cloudPassword)cloudRefresh();
+window.setInterval(()=>{
+  if(!document.hidden && cloudPassword && !cloudBusy)cloudRefresh();
+},30000);
+document.addEventListener("visibilitychange",()=>{
+  if(!document.hidden&&cloudPassword&&Date.now()-cloudLastUpdate>=30000)cloudRefresh();
+});
