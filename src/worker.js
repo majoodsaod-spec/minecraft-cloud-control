@@ -53,9 +53,9 @@ function validateLiveCommand(body) {
   if(!body||!liveCommands.has(body.type))throw Error("Unknown control operation");
   const args=body.args||{};
   if(typeof args!=="object"||Array.isArray(args))throw Error("Invalid command arguments");
-  if(body.type==="console" && (typeof args.command!=="string" || args.command.length>240 || /[\\r\\n]/.test(args.command)))throw Error("Invalid console command");
+  if(body.type==="console" && (typeof args.command!=="string" || args.command.length>240 || /[\r\n]/.test(args.command)))throw Error("Invalid console command");
   if(["kick","ban","pardon","whitelist-add","whitelist-remove","op","deop"].includes(body.type) && !/^[A-Za-z0-9_]{3,16}$/.test(args.player||""))throw Error("Invalid Minecraft username");
-  if(body.type.startsWith("files-") && (typeof args.path!=="string"||args.path.length>180||args.path.startsWith("/")||args.path.split("/").some(p=>!p||p==="."||p==="..")||/[\\\\\\x00-\\x1f]/.test(args.path)))throw Error("Invalid file path");
+  if(body.type.startsWith("files-") && !(body.type==="files-list" && (args.path==="." || args.path==="")) && (typeof args.path!=="string"||args.path.length>180||args.path.startsWith("/")||args.path.split("/").some(p=>!p||p==="."||p==="..")||/[\\\\\\x00-\\x1f]/.test(args.path)))throw Error("Invalid file path");
   if(body.type==="files-write"&&(typeof args.content!=="string"||args.content.length>262144))throw Error("File content must be text, maximum 256 KiB");
   return {type:body.type,args};
 }
@@ -106,7 +106,7 @@ async function handleControl(request, env) {
     }
     if(action==="plugin-upload") {
       const name=input.name,content=input.content;
-      if(typeof name!=="string"||!/^[a-zA-Z0-9_.-]{1,80}\\.jar$/.test(name)||name.startsWith("."))
+      if(typeof name!=="string"||!/^[a-zA-Z0-9_.-]{1,80}\.jar$/.test(name)||name.startsWith("."))
         return json({error:"Invalid plugin filename"},400);
       if(typeof content!=="string"||content.length>900000||!/^[A-Za-z0-9+/]*={0,2}$/.test(content))
         return json({error:"Plugin JAR too large (maximum 650 KiB per upload) or invalid"},400);
@@ -117,7 +117,7 @@ async function handleControl(request, env) {
     }
     if(action==="plugin-remove") {
       const name=input.name;
-      if(typeof name!=="string"||!/^[A-Za-z0-9_.-]{1,80}\\.jar$/.test(name))return json({error:"Invalid plugin filename"},400);
+      if(typeof name!=="string"||!/^[A-Za-z0-9_.-]{1,80}\.jar$/.test(name))return json({error:"Invalid plugin filename"},400);
       const path="/contents/server/plugins/"+encodeURIComponent(name);
       const existing=await github(env,path);
       await github(env,path,{method:"DELETE",body:JSON.stringify({branch:"main",message:"Remove Paper plugin "+name,sha:existing.sha})});
