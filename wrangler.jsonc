@@ -1,0 +1,12 @@
+{
+  "name": "minecraft-cloud-control",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-11-06",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  }
+}
