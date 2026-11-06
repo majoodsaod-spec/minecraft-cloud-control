@@ -127,6 +127,19 @@ async function handleControl(request, env) {
       const listing=await github(env,"/contents/server/plugins").catch(err=>String(err).includes("GitHub 404:")?[]:Promise.reject(err));
       return json({plugins:Array.isArray(listing)?listing.filter(x=>x.type==="file"&&x.name.endsWith(".jar")).map(x=>({name:x.name,size:x.size})):[]});
     }
+    if (action === "restore") {
+      const run=Number(input.run_id);
+      if(!Number.isSafeInteger(run)||run<=0)return json({error:"Select a valid backup"},400);
+      const recent=await github(env,"/actions/artifacts?name=minecraft-world&per_page=100");
+      const selected=recent.artifacts.find(a=>!a.expired&&a.workflow_run?.id===run);
+      if(!selected)return json({error:"This backup is missing or expired"},404);
+      const runs=await github(env,"/actions/workflows/"+workflow+"/runs?per_page=30");
+      if(runs.workflow_runs.some(r=>["queued","in_progress","waiting","requested","pending"].includes(r.status)))
+        return json({error:"Stop the current server safely and finish its backup before restoring an older world"},409);
+      await bridgeCall(env,"desired",{desired:"on"});
+      await github(env,"/actions/workflows/"+workflow+"/dispatches",{method:"POST",body:JSON.stringify({ref:"main",inputs:{previous_run:String(run)}})});
+      return json({ok:true,message:"Restore requested. The selected backup will become the world for the next server session."});
+    }
     if (action === "start") {
       await bridgeCall(env,"desired",{desired:"on"});
       await github(env, "/actions/workflows/" + workflow + "/dispatches", {method:"POST",body:JSON.stringify({ref:"main"})});
