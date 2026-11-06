@@ -393,13 +393,13 @@ pluginsPage=function(p){
   },"primary"));
   row.append(proAction("Refresh plugin list",async()=>{
     try{
-      window.mcPlugins=(await cloudApi("plugin-list")).plugins;
+      window.mcPlugins=(await cloudApi("plugin-list",{})).plugins;
       render();
     }catch(e){proToast(e.message)}
   }));
   if(!window.mcPlugins && !window.mcPluginsLoading){
     window.mcPluginsLoading=true;
-    cloudApi("plugin-list").then(data=>{
+    cloudApi("plugin-list",{}).then(data=>{
       window.mcPlugins=data.plugins;
       if(tab==="plugins")render();
     }).catch(err=>toast(err.message)).finally(()=>window.mcPluginsLoading=false);
@@ -413,14 +413,14 @@ pluginsPage=function(p){
     item.append(proAction(plugin.enabled===false?"Enable":"Disable",async()=>{
       try{
         await cloudApi("plugin-toggle",{name:plugin.name,enabled:plugin.enabled===false});
-        window.mcPlugins=(await cloudApi("plugin-list")).plugins;
+        window.mcPlugins=(await cloudApi("plugin-list",{})).plugins;
         toast("Plugin change saved. Restart the server to apply.");
         render();
       }catch(e){toast(e.message)}
     },"outline"));
     if(!plugin.managed)item.append(proAction("Remove",async()=>{
       await cloudAction("plugin-remove",{name:plugin.name},"Remove "+plugin.name+" at the next restart?");
-      window.mcPlugins=(await cloudApi("plugin-list")).plugins;render();
+      window.mcPlugins=(await cloudApi("plugin-list",{})).plugins;render();
     },"danger"));
   }
   proNotice(panel,"Only install trusted plugins. Server plugin data is included in verified backups; plugin JARs are managed separately.");
