@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-import shutil
 import urllib.parse
 import urllib.request
 import zipfile
@@ -107,9 +106,13 @@ def install_managed_plugins(plugins: Path, state: dict[str, bool]) -> list[str]:
             installed.append(filename)
         except Exception as exc:
             target.unlink(missing_ok=True)
-            # Fail safe for required Bedrock components rather than pretending
-            # cross-play works with only half of its authentication stack.
-            if filename in ("Geyser-Spigot.jar", "floodgate-spigot.jar"):
-                raise RuntimeError(f"Cannot prepare required Bedrock plugin {filename}: {exc}") from exc
-            print(f"WARNING: Optional plugin {filename} unavailable: {exc}", flush=True)
+            print(f"WARNING: Managed plugin {filename} unavailable: {type(exc).__name__}", flush=True)
+    # Never run one cross-play half without the other. Java clients must still
+    # be able to play if a third-party download endpoint is temporarily down.
+    bedrock_pair={"Geyser-Spigot.jar","floodgate-spigot.jar"}
+    if not bedrock_pair.issubset(set(installed)):
+        for filename in bedrock_pair:
+            (plugins / filename).unlink(missing_ok=True)
+        installed=[name for name in installed if name not in bedrock_pair]
+        print("WARNING: Bedrock cross-play unavailable this session; Java server continues safely", flush=True)
     return installed
