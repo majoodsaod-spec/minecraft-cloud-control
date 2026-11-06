@@ -135,3 +135,19 @@ The plugin uses its **maintainer's normal despawn behavior**, which is the stron
 **This does modify vanilla gameplay:** a mob that picked up an item may eventually despawn where vanilla would have kept it. Dropped equipment can still naturally expire under the vanilla item timer if nobody collects it. Players should name-tag any special mobs they want preserved. Do not interpret “drops the item” as a guarantee that an unattended dropped item will remain forever.
 
 The plugin is enabled in `server/plugins/plugins-state.json` and can be toggled on the dashboard's Plugins page. It takes effect after a safe server restart; its precise current behavior and Bukkit config must be verified from the live Paper startup logs. We deliberately do not inject guessed mod-loader configuration keys into a Bukkit plugin config.
+
+
+## Interactive live file manager
+
+The Files page is a full server-backed explorer, not a free-text path editor. When the running Paper bridge is online it automatically loads the real server root and an expandable folder tree (up to two nested levels initially). The right panel lists directory contents with names, sizes, timestamps, sorting, search, and clickable folders. No folder path needs to be typed.
+
+- Breadcrumb navigation, server root, parent folder, refresh, and expandable tree
+- New directories, rename, safe text editing, delete with confirmation, and downloads
+- Styled **Upload files** and **Select plugin JAR** pickers consistent with the dashboard design
+- Upload multiple UTF-8 configuration/text files (up to 256 KiB each); live file downloads limited to 256 KiB because the authenticated bridge uses small command acknowledgements
+- File contents and changes come from the current GitHub Actions runner, not a fake GitHub repository filesystem
+- Protected Geyser/Playit secrets, Floodgate keys, operator lists, binary JAR modification, and world/player mutations remain inaccessible
+- File edits survive future sessions only after a **successful verified backup**; save/restart safely when finished
+- File operations require the server to be online and the Worker dashboard to be deployed with the matching backend version
+
+The server protects plugin JARs by routing them through the existing Plugins page rather than arbitrary live uploads. Large binary/world-file transfer and recursive folder deletion are intentionally not included in the live command bridge; use verified backups for world data.
