@@ -30,7 +30,7 @@ async function cloudRefresh(showToast=false) {
     const foot=document.querySelector(".navfoot");
     if(foot) foot.textContent="Cloudflare ↔ GitHub controls enabled";
     if(showToast) toast("Latest GitHub status loaded");
-    if(["overview","worlds","about","players","console"].includes(tab)) render();
+    if(["overview","worlds","about","players"].includes(tab)) render();
   } catch(e) {
     cloudError=e.message;
     if(/Unauthorized|not configured/i.test(e.message)){
