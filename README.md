@@ -119,3 +119,19 @@ The dashboard does not invent an IP or claim an untested tunnel is online. A sav
 **Security:** Because the repository is public, the server explicitly excludes the sensitive Geyser config and Floodgate key from world archives. Their credentials are re-created or injected at startup. If you've ever committed these secrets or saved older backups containing them, rotate them. Other world data remains in verified backup archives.
 
 References: [Geyser setup](https://geysermc.org/wiki/geyser/setup/), [Floodgate setup](https://geysermc.org/wiki/floodgate/setup/), [Playit NetherNet setup](https://playit.gg/support/use-geyser-on-fabric/), [Chunky commands](https://github.com/pop4959/Chunky/wiki/Commands), [Paper spark](https://docs.papermc.io/paper/profiling/).
+
+
+### Let Me Despawn · optimized with protected survival mechanics
+
+Let Me Despawn **1.26.10.3 (Paper/Bukkit release for Minecraft 26.3)** is installed automatically from the official Modrinth release metadata with SHA-256 verification. Fabric/NeoForge JARs and incompatible older versions are never installed.
+
+The plugin uses its **maintainer's normal despawn behavior**, which is the strongest configuration appropriate for this server without enabling extra item or mob-cleanup systems:
+
+- Unnamed mobs which become persistent *only because they picked up equipment* may despawn naturally when distant from players, rather than lingering permanently.
+- Their carried/picked-up equipment is dropped when the mob naturally despawns; the plugin does not run a separate item-clear task.
+- Named mobs remain protected. Tamed or intentionally persistent mobs are not deliberately targeted by this configuration.
+- No lower mob caps, entity stacking, aggressive despawn radius changes, hopper throttling, farm nerfs, or item-removal plugins are enabled.
+
+**This does modify vanilla gameplay:** a mob that picked up an item may eventually despawn where vanilla would have kept it. Dropped equipment can still naturally expire under the vanilla item timer if nobody collects it. Players should name-tag any special mobs they want preserved. Do not interpret “drops the item” as a guarantee that an unattended dropped item will remain forever.
+
+The plugin is enabled in `server/plugins/plugins-state.json` and can be toggled on the dashboard's Plugins page. It takes effect after a safe server restart; its precise current behavior and Bukkit config must be verified from the live Paper startup logs. We deliberately do not inject guessed mod-loader configuration keys into a Bukkit plugin config.
