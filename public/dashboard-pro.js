@@ -3,7 +3,7 @@
 const serverPhase = () => {
   if (!cloudState) return "disconnected";
   const bridge=cloudState.bridge||{},state=bridge.status||{},fresh=Boolean(state.session && Date.now()-(state.updatedAt||0)<45000);
-  if (["saving","stopping","backing_up","stopped","failed"].includes(state.phase)) {
+  if (["shutdown_requested","saving","stopping","backing_up","stopped","failed"].includes(state.phase)) {
     if(state.phase==="stopped")return cloudState.active.length?"finishing":state.phase;
     if(state.phase==="failed")return state.phase;
     return state.phase;
@@ -22,6 +22,7 @@ const displayDuration=seconds=>{
 const phaseInfo={
   online:["Online","Your Minecraft server is ready for players.","good",100],
   starting:["Starting","Preparing your world and launching the server.","waiting",12],
+  shutdown_requested:["Preparing to stop","Shutdown requested. Waiting for the server to begin saving.","waiting",14],
   saving:["Saving","Kicking players and flushing world and player data.","waiting",32],
   stopping:["Stopping","Waiting for the server to shut down cleanly.","waiting",55],
   backing_up:["Backing up","Creating and uploading your verified world backup.","waiting",78],
@@ -57,8 +58,8 @@ function proPhaseProgress(parent,phase){
   const track=proNode(parent,"div","server-progress");
   const fill=proNode(track,"div","server-progress-fill");
   fill.style.width=phaseInfo[phase][3]+"%";
-  if(["saving","stopping","backing_up","finishing","starting"].includes(phase)) fill.classList.add("progress-flow");
-  if(["saving","stopping","backing_up","finishing"].includes(phase)){
+  if(["shutdown_requested","saving","stopping","backing_up","finishing","starting"].includes(phase)) fill.classList.add("progress-flow");
+  if(["shutdown_requested","saving","stopping","backing_up","finishing"].includes(phase)){
     const steps=proNode(parent,"div","stage-line");
     const order=["saving","stopping","backing_up","stopped"];
     const reached=order.indexOf(phase);
@@ -70,10 +71,31 @@ function proPhaseProgress(parent,phase){
     });
   }
 }
+let lastRenderedServerPhase="";
+let lastRenderedFileResult="";
+let lastRenderedPlayers="";
+function updateLiveMetrics(){
+  if(!cloudState || tab!=="overview")return;
+  const state=cloudState.bridge?.status||{};
+  const elapsed=cloudLastUpdate?Math.max(0,(Date.now()-cloudLastUpdate)/1000):0;
+  const values={
+    onlineplayers:isBridgeLive()?String((state.players||[]).length):"—",
+    serveruptime:isBridgeLive()?displayDuration((state.uptime||0)+elapsed):"—",
+    nextrestart:isBridgeLive()?displayDuration(Math.max(0,(state.restartIn||0)-elapsed)):"—",
+    idlerestart:isBridgeLive()?displayDuration(Math.max(0,(state.idleRestartIn||0)-elapsed)):"—",
+    memoryusage:isBridgeLive()&&Number.isFinite(state.memoryMiB)?state.memoryMiB.toFixed(0)+" MiB":"—",
+    latestbackup:cloudState.backups?.length?new Date(cloudState.backups[0].created_at).toLocaleDateString():"None yet"
+  };
+  for(const [name,value] of Object.entries(values)){
+    const node=document.querySelector('[data-metric="'+name+'"]');
+    if(node&&node.textContent!==value)node.textContent=value;
+  }
+}
 const previousOverview=overview;
 overview=function(p){
   if(!cloudState){cloudUnlock(p);return}
   const bridge=cloudState.bridge||{}, live=bridge.status||{}, phase=serverPhase(),info=phaseInfo[phase];
+  lastRenderedServerPhase=phase;
   const hero=proNode(p,"section","server-overview");
   const heading=proNode(hero,"div","server-header");
   const left=proNode(heading,"div");
@@ -155,10 +177,9 @@ consolePage=function(p){
   send.type="submit";send.disabled=!isBridgeLive();
   form.onsubmit=e=>{e.preventDefault();const cmd=input.value.trim();if(cmd){proCommand("console",{command:cmd});input.value=""}};
   const history=cloudState.bridge?.history||[];
-  if(history.length){
-    const box=proPanel(p,"Recent command results");
-    history.slice(0,8).forEach(x=>proNode(box,"div","small muted",(x.ok?"✓ ":"! ")+x.type+" · "+(typeof x.result==="string"?x.result:"Completed")));
-  }
+  const box=proPanel(p,"Recent command results");
+  const recent=proNode(box,"div");recent.id="recent-command-results";
+  history.slice(0,8).forEach(x=>proNode(recent,"div","small muted",(x.ok?"✓ ":"! ")+x.type+" · "+(typeof x.result==="string"?x.result:"Completed")));
 };
 function latestResult(type){
   return (cloudState?.bridge?.history||[]).find(x=>x.type===type&&x.ok&&x.result)||null;
@@ -335,6 +356,47 @@ cloudRefresh=async function(notify=false){
     proNode(badge,"span","dot");
     badge.append(document.createTextNode(" "+phaseInfo[livePhase][0]));
   }
+  if(tab==="overview" && cloudState){
+    if(livePhase!==lastRenderedServerPhase)render();
+    else updateLiveMetrics();
+  }
+  if(tab==="console" && cloudState){
+    const consoleBox=document.querySelector(".pro-console");
+    if(consoleBox){
+      const nearEnd=consoleBox.scrollHeight-consoleBox.scrollTop-consoleBox.clientHeight<50;
+      consoleBox.textContent=(cloudState.bridge?.status?.logs||[]).join("\\n")||"No live output yet.";
+      if(nearEnd)consoleBox.scrollTop=consoleBox.scrollHeight;
+    }
+    const list=document.getElementById("recent-command-results");
+    if(list){
+      list.replaceChildren();
+      for(const record of (cloudState.bridge?.history||[]).slice(0,8)){
+        const result=typeof record.result==="string"?record.result:"Completed";
+        proNode(list,"div","small muted",(record.ok?"✓ ":"! ")+record.type+" · "+result);
+      }
+    }
+  }
+  if(tab==="files" && cloudState){
+    const command=(cloudState.bridge?.history||[]).find(x=>x.type?.startsWith("files-"));
+    if(command&&command.id!==lastRenderedFileResult){
+      const focused=document.activeElement;
+      if(!focused||!["INPUT","TEXTAREA"].includes(focused.tagName)){
+        lastRenderedFileResult=command.id;
+        render();
+      }
+    }
+  }
+  if(tab==="players" && cloudState){
+    const current=(cloudState.bridge?.status?.players||[]).join(",");
+    if(current!==lastRenderedPlayers){
+      const focused=document.activeElement;
+      if(!focused||focused.tagName!=="INPUT"){
+        lastRenderedPlayers=current;
+        render();
+      }
+    }
+  }
 };
 window.setInterval(()=>{if(cloudPassword&&!document.hidden&&!cloudBusy)cloudRefresh()},5000);
+window.setInterval(()=>{if(cloudPassword&&!document.hidden)updateLiveMetrics()},1000);
 render();
