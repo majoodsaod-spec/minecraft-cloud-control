@@ -89,7 +89,7 @@ The server automatically installs the following **maintained** plugins from offi
 
 | Plugin | Purpose | How it is handled |
 | --- | --- | --- |
-| EssentialsX 2.22.0 | Homes, teleport requests, messaging and common survival utilities | Pinned release and verified SHA-256; adds commands, but does not change terrain or vanilla mechanics |
+| EssentialsX 2.22.0 | Homes, teleport requests, messaging and common survival utilities | Version-pinned release with checksum from official Modrinth metadata; currently officially supports 26.1.2 (26.3 compatibility requires testing); adds commands, but does not change terrain or vanilla mechanics |
 | Chunky | Pregenerate chunks to reduce world-exploration lag | Only generates a **512-block-radius area around (0, 0)** while no players are online; pauses as soon as anyone joins and before every shutdown; automatically resumes saved progress during later quiet periods |
 | Geyser-Spigot | Minecraft Bedrock/Java compatibility | Current official build on each server start, Bedrock NetherNet transport on local port 19132 |
 | Floodgate | Let authenticated Bedrock users join without Java Edition accounts | Official build, with Geyser set to `auth-type: floodgate` |
