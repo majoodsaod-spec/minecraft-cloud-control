@@ -18,6 +18,7 @@ def fake_plugin_jar(content=b"name: Example\nmain: com.example.Example\nversion:
     buffer=io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("plugin.yml",content)
+        archive.writestr("data.bin", b"x"*2048)
     return buffer.getvalue()
 
 
