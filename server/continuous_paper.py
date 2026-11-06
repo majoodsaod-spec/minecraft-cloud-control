@@ -84,9 +84,19 @@ def set_properties() -> None:
             if "=" in line and not line.startswith("#"):
                 key, value = line.split("=", 1)
                 current[key] = value
-    current.update({"server-ip": "", "server-port": "25565", "online-mode": "true",
-                    "view-distance": "6", "simulation-distance": "4",
-                    "motd": "Minecraft Cloud Control"})
+    # Defaults only; preserve configured values saved by the Cloudflare panel.
+    configured = WORK.parent / "server" / "server.properties"
+    if configured.exists():
+        for line in configured.read_text().splitlines():
+            if "=" in line and not line.startswith("#"):
+                key, value = line.split("=", 1)
+                current[key] = value
+    defaults = {"view-distance": "6", "simulation-distance": "4",
+                "motd": "Minecraft Cloud Control"}
+    for key, value in defaults.items():
+        current.setdefault(key, value)
+    # Bind on all runner interfaces for the local Playit agent; keep authenticated accounts.
+    current.update({"server-ip": "", "server-port": "25565", "online-mode": "true"})
     path.write_text("".join(f"{k}={v}\n" for k, v in current.items()))
 
 
