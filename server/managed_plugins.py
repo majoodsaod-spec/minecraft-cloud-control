@@ -116,6 +116,32 @@ def analyzer_build() -> tuple[str, str | None]:
     raise RuntimeError("No verified non-gameplay-changing PerformanceAnalyzer 26.3 release")
 
 
+def let_me_despawn_build() -> tuple[str, str | None]:
+    """Verified Paper-specific LMD 1.26.10.3 release for Minecraft 26.3.
+
+    Never fall back to Fabric/NeoForge builds, old Bukkit jars, prereleases,
+    or a build without a published SHA-256 hash.
+    """
+    versions = fetch_json("https://api.modrinth.com/v2/project/lmd/version")
+    for version in versions:
+        if str(version.get("version_number", "")).lstrip("v") != "1.26.10.3":
+            continue
+        if version.get("version_type") != "release":
+            continue
+        if "26.3" not in version.get("game_versions", []):
+            continue
+        if not {"paper", "bukkit", "spigot"}.intersection(version.get("loaders", [])):
+            continue
+        jars = sorted((item for item in version.get("files", [])
+                       if item.get("filename", "").endswith(".jar")),
+                      key=lambda item: not item.get("primary", False))
+        for file in jars:
+            checksum = file.get("hashes", {}).get("sha256")
+            if checksum and len(checksum) == 64 and file.get("url", "").startswith("https://"):
+                return file["url"], checksum
+    raise RuntimeError("No verified Let Me Despawn 1.26.10.3 Paper 26.3 release")
+
+
 def chunky_build() -> tuple[str, str | None]:
     versions = fetch_json(MODRINTH_API)
     for version in versions:
@@ -137,6 +163,7 @@ def install_managed_plugins(plugins: Path, state: dict[str, bool]) -> list[str]:
         ("EssentialsX.jar", essentials_build),
         ("Chunky.jar", chunky_build),
         ("PerformanceAnalyzer.jar", analyzer_build),
+        ("LetMeDespawn.jar", let_me_despawn_build),
         ("Geyser-Spigot.jar", lambda: geyser_build("geyser", "spigot")),
         ("floodgate-spigot.jar", lambda: geyser_build("floodgate", "spigot")),
     ]
