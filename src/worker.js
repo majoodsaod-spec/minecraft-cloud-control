@@ -48,7 +48,7 @@ async function bridgeCall(env, route, value) {
   if(!response.ok)throw Error(body.error||"Live control service unavailable");
   return body;
 }
-const liveCommands=new Set(["console","kick","ban","pardon","whitelist-add","whitelist-remove","whitelist-on","whitelist-off","op","deop","save","restart","files-list","files-read","files-write","files-delete","plugins-list"]);
+const liveCommands=new Set(["console","kick","ban","pardon","whitelist-add","whitelist-remove","whitelist-on","whitelist-off","op","deop","save","restart","shutdown","files-list","files-read","files-write","files-delete","plugins-list"]);
 function validateLiveCommand(body) {
   if(!body||!liveCommands.has(body.type))throw Error("Unknown control operation");
   const args=body.args||{};
@@ -128,14 +128,17 @@ async function handleControl(request, env) {
       return json({plugins:Array.isArray(listing)?listing.filter(x=>x.type==="file"&&x.name.endsWith(".jar")).map(x=>({name:x.name,size:x.size})):[]});
     }
     if (action === "start") {
+      await bridgeCall(env,"desired",{desired:"on"});
       await github(env, "/actions/workflows/" + workflow + "/dispatches", {method:"POST",body:JSON.stringify({ref:"main"})});
       return json({ok:true,message:"Workflow requested"});
     }
     if (action === "stop") {
-      const id = Number(input.run_id);
-      if (!Number.isSafeInteger(id) || id <= 0) return json({error:"Valid run ID required"},400);
-      await github(env, "/actions/runs/" + id + "/cancel", {method:"POST"});
-      return json({ok:true,message:"Cancellation requested; latest unsaved progress may be lost"});
+      const state=await bridgeCall(env,"state");
+      if(!state.status?.session || Date.now()-(state.status.updatedAt||0)>45000)
+        return json({error:"Paper runner is offline. Cannot safely save and stop; no cancellation was sent."},409);
+      await bridgeCall(env,"desired",{desired:"off"});
+      await bridgeCall(env,"enqueue",{type:"shutdown",args:{}});
+      return json({ok:true,message:"Safe shutdown requested: kick players, save all, stop Paper, upload verified backup, stay offline."},202);
     }
     if (action === "settings") {
       const body = input.properties;
@@ -170,6 +173,12 @@ async function handleControl(request, env) {
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
+    if(path==="/api/desired"){
+      if(!env.BRIDGE_TOKEN)return json({error:"Bridge not configured"},503);
+      const token=(request.headers.get("Authorization")||"").replace(/^Bearer /,"");
+      if(!token||!await equals(token,env.BRIDGE_TOKEN))return json({error:"Unauthorized"},401);
+      return json(await bridgeCall(env,"state").then(x=>({desired:x.desired})));
+    }
     if(path==="/api/bridge"){
       if(!env.BRIDGE_TOKEN)return json({error:"Live bridge not configured"},503);
       const token=(request.headers.get("Authorization")||"").replace(/^Bearer /,"");
