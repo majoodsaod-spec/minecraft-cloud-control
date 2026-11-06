@@ -94,7 +94,8 @@ overview=function(p){
   for(const [title,value,desc] of metrics){
     const card=proNode(dashboard,"div","panel server-stat");
     proNode(card,"div","server-stat-label",title);
-    proNode(card,"strong","server-stat-value",value);
+    const valueNode=proNode(card,"strong","server-stat-value",value);
+    valueNode.dataset.metric=title.toLowerCase().replace(/[^a-z]/g,"");
     proNode(card,"div","muted small",desc);
   }
   const controls=proPanel(p,"Server controls");
@@ -267,6 +268,53 @@ aboutPage=function(p){
   panel.append(proAction("Disconnect dashboard",()=>{
     cloudPassword="";cloudState=null;sessionStorage.removeItem("mccloud-admin");render();
   },"danger"));
+};
+// Server-first settings: supported values apply on the next safe start.
+settingsPage=function(p){
+  if(!cloudState){cloudUnlock(p);return}
+  const panel=proPanel(p,"Server configuration");
+  proNode(panel,"p","muted small","Adjust your world, gameplay and network options below. Save them to apply automatically when the server next starts.");
+  const buttons=proNode(panel,"div","dashboard-actions");
+  const supported=["motd","max-players","difficulty","gamemode","pvp","allow-flight","white-list","enforce-whitelist","online-mode","enable-command-block","spawn-protection","view-distance","simulation-distance","max-world-size","allow-nether","spawn-monsters","spawn-animals","spawn-npcs","hardcore","force-gamemode","player-idle-timeout"];
+  buttons.append(proAction("Save server settings",()=>cloudAction("settings",{properties:Object.fromEntries(supported.map(k=>[k,settings[k]]))},"Save the new configuration? It applies after the server starts again."),"primary"));
+  buttons.append(proAction("Load saved configuration",()=>{
+    if(!cloudState.properties){proToast("No saved server configuration is available");return}
+    for(const line of cloudState.properties.split(/\r?\n/)){
+      const index=line.indexOf("=");
+      if(index<1||line.startsWith("#"))continue;
+      const key=line.slice(0,index),raw=line.slice(index+1);
+      const spec=schema.find(x=>x[0]===key);
+      if(!spec||!supported.includes(key))continue;
+      if(spec[3]==="bool")settings[key]=raw==="true";
+      else if(spec[3]==="number" && Number.isFinite(Number(raw)))settings[key]=Number(raw);
+      else if(spec[3]!=="number")settings[key]=raw;
+    }
+    persist();render();proToast("Saved configuration loaded");
+  },"outline",!cloudState.properties));
+  proNode(panel,"p","muted small","Online authentication stays enabled. Minecraft listens on its configured tunnel port. Some changes require a restart.");
+  previewSettings(p);
+  p.prepend(panel);
+};
+worldsPage=function(p){
+  if(!cloudState){cloudUnlock(p);return}
+  const panel=proPanel(p,"Worlds & backups");
+  proNode(panel,"p","muted small","Your world, player inventories and progress are preserved in verified snapshots after a clean shutdown.");
+  const controls=proNode(panel,"div","dashboard-actions");
+  controls.append(proAction("Save world",()=>proCommand("save"),"outline",!isBridgeLive()));
+  controls.append(proAction("Save & restart",()=>proCommand("restart",{},"Save and restart the server, creating a verified backup?"),"primary",!isBridgeLive()));
+  controls.append(proAction("Refresh backups",()=>cloudRefresh(true)));
+  const backups=cloudState.backups||[];
+  if(!backups.length)proNode(panel,"p","muted","No verified backup has been uploaded yet.");
+  for(const item of backups){
+    const row=proNode(panel,"div","backup-row");
+    const info=proNode(row,"div");
+    proNode(info,"strong","",new Date(item.created_at).toLocaleString());
+    proNode(info,"div","muted small",(item.size_in_bytes/1048576).toFixed(1)+" MiB · Saved world");
+    const actions=proNode(row,"div","flex");
+    proLink(actions,"View backup","https://github.com/majoodsaod-spec/minecraft-cloud-control/actions/runs/"+item.run_id);
+    actions.append(proAction("Restore",()=>cloudAction("restore",{run_id:item.run_id},"Replace the current saved world with this older backup and start the server? Newer progress will be lost."),"outline",cloudState.active.length>0));
+  }
+  proNotice(p,"To restore an older snapshot, safely stop the server and wait until the backup upload finishes. Never cancel a running save.");
 };
 const previousRefresh=cloudRefresh;
 cloudRefresh=async function(notify=false){
