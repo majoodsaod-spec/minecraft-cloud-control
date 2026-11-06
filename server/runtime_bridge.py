@@ -48,9 +48,9 @@ class LiveBridge:
         self.thread.start()
         print("Cloudflare live bridge enabled",flush=True)
 
-    def _request(self, payload):
+    def _request(self, payload, route="/api/bridge"):
         request=urllib.request.Request(
-            self.url+"/api/bridge",
+            self.url+route,
             data=json.dumps(payload).encode(),
             headers={"Authorization":"Bearer "+self.token,"Content-Type":"application/json",
                      "User-Agent":"minecraft-cloud-bridge/1"},
@@ -58,6 +58,15 @@ class LiveBridge:
         )
         with urllib.request.urlopen(request,timeout=15) as reply:
             return json.load(reply)
+
+    def phase(self, phase, detail=""):
+        """Best effort status event; failure never interrupts world saving."""
+        if not self.url or not self.token:
+            return
+        try:
+            self._request({"session":self.session,"phase":phase,"detail":detail}, "/api/bridge-event")
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            print("Could not report dashboard lifecycle phase:",type(exc).__name__,flush=True)
 
     def _path(self, relative, write=False):
         if not isinstance(relative,str) or not relative or len(relative)>180 or not SAFE_PATH.fullmatch(relative):
@@ -142,7 +151,7 @@ class LiveBridge:
                 players=sorted(self.players)
                 logs=list(self.log_lines)[-60:]
             status={"ready":self.ready.is_set(),"players":players,"logs":logs,
-                    "uptime":int(time.monotonic()-self.started)}
+                    "uptime":int(time.monotonic()-self.started),"phase":"running" if self.ready.is_set() else "starting"}
             outgoing=list(self.acked)
             try:
                 incoming=self._request({"session":self.session,"status":status,"acks":outgoing})
