@@ -80,7 +80,9 @@ def download_paper(version: str) -> Path:
     if not stable:
         raise RuntimeError(f"No STABLE Paper build available for {version}")
     stable.sort(key=lambda b: int(b["id"]), reverse=True)
-    url = stable[0]["downloads"]["server:default"]["url"]
+    download = stable[0]["downloads"]["server:default"]
+    url = download["url"]
+    expected_sha = download["checksums"]["sha256"]
     if not url.startswith("https://"):
         raise RuntimeError("Unexpected Paper download URL")
     dest = WORK / "paper.jar"
@@ -91,6 +93,8 @@ def download_paper(version: str) -> Path:
         shutil.copyfileobj(res, out)
     if dest.stat().st_size < 1000000:
         raise RuntimeError("Paper download unexpectedly small")
+    if digest(dest) != expected_sha:
+        raise RuntimeError("Paper download SHA-256 mismatch")
     print(f"Downloaded Paper {version}, build {stable[0]['id']}", flush=True)
     return dest
 
