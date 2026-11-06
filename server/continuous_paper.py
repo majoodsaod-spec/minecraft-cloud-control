@@ -70,7 +70,7 @@ def snapshot() -> None:
                 continue
             # Geyser's Playit NetherNet signaling token must never enter a
             # publicly accessible artifact. Re-create config from JAR + secret.
-            if rel.as_posix() == "plugins/Geyser-Spigot/config.yml":
+            if rel.as_posix() in ("plugins/Geyser-Spigot/config.yml", "plugins/floodgate/key.pem"):
                 continue
             if rel.parts[0] == "paper.jar":
                 continue
@@ -123,6 +123,8 @@ def synchronize_plugins() -> None:
     for name, jar in source.items():
         shutil.copyfile(jar, installed / name)
     managed = install_managed_plugins(installed, enabled)
+    # Floodgate credentials must not persist in public-facing artifacts.
+    (DATA / "plugins" / "floodgate" / "key.pem").unlink(missing_ok=True)
     configure_geyser(DATA)
     print(f"Configured {len(source)} uploaded and {len(managed)} managed Paper plugins", flush=True)
 
