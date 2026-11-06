@@ -58,6 +58,9 @@ overview=function(p){
     const c=element("div","panel stat");c.append(element("span","",key),element("b","",value));cards.append(c)
   }
   p.append(cards);
+  if(cloudState.warnings && cloudState.warnings.length) {
+    for(const warning of cloudState.warnings) addNotice(p, warning);
+  }
   const section=element("div","panel section");
   section.append(element("h2","","Server control"));
   addNotice(section,"Start and Stop control GitHub Actions, not the live Minecraft console. Cancelling a run can lose progress since its last verified backup. Settings apply on a new server session.");
