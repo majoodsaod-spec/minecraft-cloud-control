@@ -214,7 +214,36 @@ consolePage=function(p){
   input.addEventListener("input",()=>{try{sessionStorage.setItem(CONSOLE_DRAFT,input.value)}catch{}});
   const send=proNode(form,"button","btn primary","Send");
   send.type="submit";send.disabled=!isBridgeLive();
-  form.onsubmit=e=>{e.preventDefault();const cmd=input.value.trim();if(cmd){proCommand("console",{command:cmd});input.value="";sessionStorage.removeItem(CONSOLE_DRAFT)}};
+  form.onsubmit=async e=>{
+    e.preventDefault();
+    const cmd=input.value.trim();
+    if(!cmd || !isBridgeLive())return;
+    if(cmd.length>240 || /[\r\n]/.test(cmd)){toast("Command is too long or contains a line break");return}
+    input.value="";
+    sessionStorage.removeItem(CONSOLE_DRAFT);
+    send.disabled=true;
+    const receipt="[You] /"+cmd+"  · sending…";
+    consoleHistory.push(receipt);
+    consoleHistory=consoleHistory.slice(-400);
+    consoleBox.textContent=consoleHistory.join("\n");
+    consoleBox.scrollTop=consoleBox.scrollHeight;
+    try{
+      const response=await cloudApi("live-command",{type:"console",args:{command:cmd}});
+      consoleHistory[consoleHistory.lastIndexOf(receipt)]="[You] /"+cmd+"  · queued for server";
+      toast("Command queued");
+    }catch(error){
+      const index=consoleHistory.lastIndexOf(receipt);
+      if(index>=0)consoleHistory[index]="[You] /"+cmd+"  · not sent: "+error.message;
+      input.value=cmd;
+      sessionStorage.setItem(CONSOLE_DRAFT,cmd);
+      toast(error.message);
+    }finally{
+      send.disabled=!isBridgeLive();
+      consoleBox.textContent=consoleHistory.join("\n");
+      consoleBox.scrollTop=consoleBox.scrollHeight;
+      try{sessionStorage.setItem(CONSOLE_STORE,JSON.stringify({session:consoleSession,lines:consoleHistory}));}catch{}
+    }
+  };
   const history=cloudState.bridge?.history||[];
   const box=proPanel(p,"Recent command results");
   const recent=proNode(box,"div");recent.id="recent-command-results";
@@ -499,6 +528,9 @@ async function cloudLiveRefresh(){
     }
   }finally{liveRefreshPending=false}
 }
-window.setInterval(()=>{if(cloudPassword&&!document.hidden)cloudLiveRefresh()},5000);
+window.setInterval(()=>{if(cloudPassword&&!document.hidden && (tab==="console" || Date.now()-(window.mcLastLivePoll||0)>=5000)){
+  window.mcLastLivePoll=Date.now();
+  cloudLiveRefresh();
+}},1000);
 window.setInterval(()=>{if(cloudPassword&&!document.hidden)updateLiveMetrics()},1000);
 render();
