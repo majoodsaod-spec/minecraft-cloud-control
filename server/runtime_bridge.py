@@ -21,7 +21,7 @@ MAX_FILE = 256 * 1024
 
 
 class LiveBridge:
-    def __init__(self, data: Path, session: str, players: set, lock, log_lines, ready, send, restart_event):
+    def __init__(self, data: Path, session: str, players: set, lock, log_lines, ready, send, restart_event, shutdown_event):
         self.data=data.resolve()
         self.session=session
         self.players=players
@@ -30,6 +30,7 @@ class LiveBridge:
         self.ready=ready
         self.send=send
         self.restart_event=restart_event
+        self.shutdown_event=shutdown_event
         self.url=os.environ.get("CLOUDFLARE_CONTROL_URL", "").rstrip("/")
         self.token=os.environ.get("CLOUDFLARE_BRIDGE_TOKEN", "")
         self.acked=deque(maxlen=50)
@@ -104,6 +105,9 @@ class LiveBridge:
         if kind=="restart":
             self.restart_event.set()
             return "Graceful backup/restart requested"
+        if kind=="shutdown":
+            self.shutdown_event.set()
+            return "Graceful shutdown requested; backup will upload before workflow exits"
         if kind=="plugins-list":
             return [{"name":p.name,"bytes":p.stat().st_size} for p in (self.data/"plugins").glob("*.jar")][:100]
         if kind=="files-list":
@@ -133,7 +137,7 @@ class LiveBridge:
         raise ValueError("Unsupported command")
 
     def _loop(self):
-        while not self.restart_event.is_set():
+        while not self.restart_event.is_set() and not self.shutdown_event.is_set():
             with self.lock:
                 players=sorted(self.players)
                 logs=list(self.log_lines)[-60:]
