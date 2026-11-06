@@ -179,6 +179,16 @@ export default {
       if(!token||!await equals(token,env.BRIDGE_TOKEN))return json({error:"Unauthorized"},401);
       return json(await bridgeCall(env,"state").then(x=>({desired:x.desired})));
     }
+    if(path==="/api/bridge-event"){
+      if(!env.BRIDGE_TOKEN)return json({error:"Live bridge not configured"},503);
+      const token=(request.headers.get("Authorization")||"").replace(/^Bearer /,"");
+      if(!token||!await equals(token,env.BRIDGE_TOKEN))return json({error:"Unauthorized"},401);
+      if(request.method!=="POST")return json({error:"Method not allowed"},405);
+      try{
+        const payload=await request.json();
+        return json(await bridgeCall(env,"event",payload));
+      }catch(e){return json({error:String(e.message)},400)}
+    }
     if(path==="/api/bridge"){
       if(!env.BRIDGE_TOKEN)return json({error:"Live bridge not configured"},503);
       const token=(request.headers.get("Authorization")||"").replace(/^Bearer /,"");
