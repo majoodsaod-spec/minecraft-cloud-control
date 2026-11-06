@@ -136,7 +136,7 @@ async function handleControl(request, env) {
         return json({error:"Paper agent is offline; live commands require an active session."},409);
       return json(await bridgeCall(env,"enqueue",data),202);
     }
-    const managedPlugins = new Set(["EssentialsX.jar","Chunky.jar","PerformanceAnalyzer.jar","Geyser-Spigot.jar","floodgate-spigot.jar"]);
+    const managedPlugins = new Set(["EssentialsX.jar","Chunky.jar","PerformanceAnalyzer.jar","LetMeDespawn.jar","Geyser-Spigot.jar","floodgate-spigot.jar"]);
     if(action==="plugin-upload") {
       const name=input.name,content=input.content;
       if(typeof name!=="string"||!name.endsWith(".jar")||name.length>80||!/^[A-Za-z0-9_.-]+$/.test(name)||name.startsWith("."))
