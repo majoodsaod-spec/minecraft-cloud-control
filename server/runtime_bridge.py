@@ -85,8 +85,9 @@ class LiveBridge:
             raise ValueError("File escapes server directory")
         # Never expose authentication material, private player data or secret
         # runtime files to a browser, even if a dashboard password is compromised.
-        parts={part.lower() for part in path.parts}
-        if any(p.startswith(".") for p in path.parts) or resolved.name.lower() in (
+        resolved_parts=resolved.relative_to(self.data).parts
+        parts={part.lower() for part in (*path.parts,*resolved_parts)}
+        if any(p.startswith(".") for p in (*path.parts,*resolved_parts)) or resolved.name.lower() in (
             "key.pem","usercache.json","ops.json","whitelist.json",
             "banned-players.json","banned-ips.json","eula.txt",
             "credentials.json","secrets.json"
@@ -95,7 +96,7 @@ class LiveBridge:
         ):
             raise ValueError("This file is protected")
         if write and (any(part in ("world","world_nether","world_the_end") or part.startswith("world_")
-                          for part in path.parts) or
+                          for part in (*path.parts,*resolved_parts)) or
                       "playerdata" in parts or "stats" in parts or
                       "advancements" in parts or
                       path.parts[0] in ("plugins",) and resolved.suffix.lower()==".jar" or
