@@ -85,6 +85,37 @@ def essentials_build() -> tuple[str, str | None]:
     raise RuntimeError("Official EssentialsX 2.22.0 release metadata unavailable")
 
 
+def analyzer_build() -> tuple[str, str | None]:
+    """Select a modern monitoring-only PerformanceAnalyzer build.
+
+    Version 3.1+ removed gameplay-altering entity cleaner/anti-cheat features.
+    Require a release explicitly declaring current Minecraft compatibility.
+    """
+    versions = fetch_json("https://api.modrinth.com/v2/project/performanceanalyzer/version")
+    for version in versions:
+        number = str(version.get("version_number", "")).lstrip("v")
+        parts = number.split(".")
+        if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+            continue
+        if (int(parts[0]), int(parts[1])) < (3, 1):
+            continue
+        if version.get("version_type") != "release":
+            continue
+        if "26.3" not in version.get("game_versions", []):
+            continue
+        if not {"paper", "purpur", "spigot"}.intersection(version.get("loaders", [])):
+            continue
+        jars = sorted((item for item in version.get("files", [])
+                       if item.get("filename", "").lower().endswith(".jar")),
+                      key=lambda item: not item.get("primary", False))
+        if jars:
+            item = jars[0]
+            if not item.get("hashes", {}).get("sha256"):
+                continue
+            return item["url"], item["hashes"]["sha256"]
+    raise RuntimeError("No verified non-gameplay-changing PerformanceAnalyzer 26.3 release")
+
+
 def chunky_build() -> tuple[str, str | None]:
     versions = fetch_json(MODRINTH_API)
     for version in versions:
@@ -105,6 +136,7 @@ def install_managed_plugins(plugins: Path, state: dict[str, bool]) -> list[str]:
     specs = [
         ("EssentialsX.jar", essentials_build),
         ("Chunky.jar", chunky_build),
+        ("PerformanceAnalyzer.jar", analyzer_build),
         ("Geyser-Spigot.jar", lambda: geyser_build("geyser", "spigot")),
         ("floodgate-spigot.jar", lambda: geyser_build("floodgate", "spigot")),
     ]
