@@ -98,18 +98,23 @@ overview=function(p){
   }
   const section=element("div","panel section");
   section.append(element("h2","","Server control"));
-  addNotice(section,"Start and Stop control GitHub Actions, not the live Minecraft console. Cancelling a run can lose progress since its last verified backup. Settings apply on a new server session.");
+  addNotice(section,"Safe Stop warns and kicks players, saves all data, stops Paper and uploads a verified backup. It will NOT dispatch another run. Start restores the latest backup before running. The Paper bridge must be online.");
   const actions=element("div","flex");
   const startBtn=button("▶ Start",()=>cloudAction("start",{},"Start a new Minecraft server workflow?"),"primary");
   startBtn.disabled=active.length>0;
   actions.append(startBtn);
-  for(const r of active) {
-    actions.append(button("■ Stop run "+r.id,()=>cloudAction("stop",{run_id:r.id},"Cancel this run? Progress since its last successful backup may be lost."),"danger"));
+  if(active.length){
+    const live=cloudState.bridge?.status;
+    const available=Boolean(live?.session && Date.now()-(live.updatedAt||0)<45000);
+    const stopBtn=button("■ Save & Stop",()=>cloudAction("stop",{},"Kick everyone, save all player/world data, shut down Paper, back up, and remain offline?"),"danger");
+    stopBtn.disabled=!available;
+    stopBtn.title=available?"Graceful stop with verified backup":"Live Paper bridge offline. Unsafe cancellation is intentionally not offered here.";
+    actions.append(stopBtn);
   }
   actions.append(button("↻ Refresh status",()=>cloudRefresh(true),"outline"));
   actions.append(button("⚙ Configure server",()=>{tab="settings";render()},"outline"));
   section.append(actions);
-  const tip=element("p","small muted","Backups are created at graceful scheduled shutdown, not on demand. For a safe backup, use the regular 5h30m or idle restart.");
+  const tip=element("p","small muted","After Save & Stop, the server remains offline until you press Start. Allow time for the workflow to finish uploading the new backup. This is not immediate cancellation.");
   section.append(tip);
   if(cloudState.latest){
     const link=element("a","small", "Open latest GitHub run #"+cloudState.latest.id);
