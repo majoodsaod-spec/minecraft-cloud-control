@@ -11,7 +11,7 @@ Use **Actions → Continuous Paper Minecraft Server → Run workflow** to start 
 - After successful artifact upload, the workflow dispatches a **new workflow run**, which downloads and verifies the exact previous run's snapshot, restores the world, and starts Paper anew. The next session receives a fresh GitHub-hosted runner time limit.
 - A **daily scheduled recovery check** can start a session after a broken handoff. It skips when another run is active. Continuous handoffs already rerun the workflow many times within any 30-day period.
 
-The artifact `minecraft-world` preserves world files, playerdata, advancements, inventories and server config, with SHA-256 verification. Retention is 90 days (subject to repository policy); for permanent worlds, use an independent persistent backup location. Do not delete the last successful backup.
+The artifact `minecraft-world` preserves world files, playerdata, advancements, inventories and server config, with SHA-256 verification. The workflow retains only the ten newest unexpired `minecraft-world` artifacts, pruning older ones after a verified backup has been uploaded and a successor workflow has been dispatched. Individual artifacts have a maximum retention setting of 90 days (subject to repository policy). Keep an independent off-GitHub backup for important worlds.
 
 ### Player connectivity
 
@@ -25,4 +25,22 @@ GitHub cron cannot express exact rolling 30-day intervals; the daily recovery tr
 
 ## Dashboard
 
-The root `index.html` is a zero-dependency mobile-friendly static dashboard intended for Cloudflare Pages (framework preset **None**, build command empty, root output directory). Its local drafts and UI previews are not connected to the Minecraft server or to GitHub Actions. Never embed secrets in browser-visible files.
+The root `index.html` is a zero-dependency mobile-friendly dashboard for **Cloudflare Pages** (framework preset **None**, build command empty, output directory `/`). The Pages Function `functions/api/control.js` is the authenticated backend for its GitHub Actions controls.
+
+### Required Cloudflare Pages configuration
+
+In Cloudflare → Workers & Pages → this Pages project → **Settings → Variables and Secrets**, create encrypted **secrets** for the production environment (and preview environment if you use it):
+
+- `ADMIN_PASSWORD`: generate a unique, strong administrator password, separate from Minecraft credentials.
+- `GITHUB_TOKEN`: fine-grained GitHub PAT scoped **only** to `majoodsaod-spec/minecraft-cloud-control`, granting Actions **read/write** and Contents **read/write**. Store only in Cloudflare, never in the browser or source files.
+- `GITHUB_REPO` (optional): defaults to `majoodsaod-spec/minecraft-cloud-control`.
+
+Redeploy the Pages project after adding secrets. The Cloudflare Pages deployment must support **Pages Functions**; a static-only upload cannot execute `/api/control`. Ideally also protect the entire Pages site with **Cloudflare Access** to restrict visitors before they reach the dashboard. The dashboard prompts for the admin password and stores it only in the current browser tab's `sessionStorage`, never in the repo.
+
+### What the dashboard can and cannot control
+
+**Connected:** view GitHub workflow state and the 10 most recent backups; request a fresh server run; cancel an active run (unsafe for unsaved progress); change supported `server.properties` settings and commit them to GitHub. Properties are read at the next server session, not hot-applied. Click **Connect** and enter `ADMIN_PASSWORD` to enable these controls.
+
+**Not implemented:** real-time Paper console, live player counts/kicks/bans, whitelist commands, arbitrary server file editing, plugin JAR uploads, immediate safe backup, restart-with-save on demand, and direct Cloudflare-to-Playit integration. Those require an authenticated runtime control channel or external persistent backend. The dashboard clearly labels its remaining pages as previews; their local data is not synchronized to Paper.
+
+**Important:** GitHub Actions isn't a reliable always-on game host, and a cancelled job may lose changes since the last successful backup. Automatic deletion of backups cannot eliminate storage charges or quota overruns when each world ZIP itself becomes large. Never put secrets in `index.html` or `dashboard-live.js`.
