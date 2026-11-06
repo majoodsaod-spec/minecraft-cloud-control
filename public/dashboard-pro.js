@@ -405,6 +405,11 @@ async function fileLoadTree(){
   try{
     const data=await fileTask("files-tree",{});
     fileManager.tree=Array.isArray(data.roots)?data.roots:[];
+    // Open the top-level branches by default; the user can collapse them.
+    for(const branch of fileManager.tree){
+      if(fileManager.expanded[branch.path]===undefined)
+        fileManager.expanded[branch.path]=true;
+    }
     if(tab==="files")render();
   }catch(error){
     fileManager.error="Could not load server folder tree: "+error.message;
