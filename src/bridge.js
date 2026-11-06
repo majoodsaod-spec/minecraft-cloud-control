@@ -22,6 +22,9 @@ export class MinecraftBridge {
         await this.ctx.storage.put("commands",[]);
         const state=await get("status",{});
         if(!state.session||["stopped","failed"].includes(state.phase))await this.ctx.storage.put("status",{...state,phase:"starting",ready:false,updatedAt:Date.now()});
+      } else {
+        const state=await get("status",{});
+        if(state.session && state.ready) await this.ctx.storage.put("status",{...state,phase:"shutdown_requested",updatedAt:Date.now()});
       }
       return Response.json({ok:true,desired:body.desired});
     }
@@ -48,7 +51,7 @@ export class MinecraftBridge {
       const status=await get("status",{});
       const patch=body.status||{};
       const next={...status,...patch,updatedAt:Date.now(),session:body.session||""};
-      if(["saving","stopping","backing_up","stopped"].includes(status.phase) && patch.phase==="running" && status.session===body.session) next.phase=status.phase;
+      if(["shutdown_requested","saving","stopping","backing_up","stopped"].includes(status.phase) && patch.phase==="running" && status.session===body.session) next.phase=status.phase;
       const logs=Array.isArray(patch.logs)?patch.logs.slice(-100):[];
       next.logs=logs.map(x=>String(x).slice(0,400));
       next.players=Array.isArray(patch.players)?patch.players.slice(0,100):[];
