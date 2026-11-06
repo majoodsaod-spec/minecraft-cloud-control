@@ -30,7 +30,7 @@ async function cloudRefresh(showToast=false) {
     const foot=document.querySelector(".navfoot");
     if(foot) foot.textContent="Live server controls connected";
     if(showToast) toast("Latest GitHub status loaded");
-    if(["worlds","about"].includes(tab)) render();
+    if(showToast && ["worlds","about"].includes(tab)) render();
   } catch(e) {
     cloudError=e.message;
     if(/Unauthorized|not configured/i.test(e.message)){
