@@ -257,16 +257,17 @@ class LiveBridge:
 
     def _loop(self):
         while not self.restart_event.is_set() and not self.shutdown_event.is_set():
+            now=time.monotonic()
             with self.lock:
                 players=sorted(self.players)
                 logs=list(self.log_lines)[-60:]
-            now=time.monotonic()
-            with self.lock:
-                idle_remaining=max(0,3600-int(now-self.observed["last_join"]))
+                empty_since=self.observed.get("empty_since")
+                empty_seconds=max(0,int(now-empty_since)) if not players and empty_since is not None else 0
+                idle_remaining=max(0,3600-empty_seconds) if not players else 3600
             uptime=max(0,int(now-self.started))
             status={"ready":self.ready.is_set(),"players":players,"logs":logs,
                     "uptime":uptime,"restartIn":max(0,19800-uptime),
-                    "idleRestartIn":idle_remaining,"memoryMiB":self._memory_mb(),"memoryLimitMiB":8192,
+                    "idleRestartIn":idle_remaining,"emptyFor":empty_seconds,"memoryMiB":self._memory_mb(),"memoryLimitMiB":8192,
                     "phase":"running" if self.ready.is_set() else "starting"}
             outgoing=list(self.acked)
             try:
