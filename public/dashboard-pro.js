@@ -89,6 +89,7 @@ overview=function(p){
     ["Next restart",isBridgeLive()?displayDuration(Math.max(0,live.restartIn-(Date.now()-live.updatedAt)/1000)):"—","Scheduled maximum uptime"],
     ["Idle restart",isBridgeLive()?displayDuration(Math.max(0,live.idleRestartIn-(Date.now()-live.updatedAt)/1000)):"—","Time since last player joined"],
     ["Latest backup",cloudState.backups?.length?new Date(cloudState.backups[0].created_at).toLocaleDateString():"None yet","Verified saved snapshot"],
+    ["Memory usage",isBridgeLive()&&Number.isFinite(live.memoryMiB)?live.memoryMiB.toFixed(0)+" MiB":"—","Allocated up to 3072 MiB"],
     ["Software","Paper 26.3","Java 25"]
   ];
   for(const [title,value,desc] of metrics){
