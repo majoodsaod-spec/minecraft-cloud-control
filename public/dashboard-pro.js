@@ -323,7 +323,7 @@ function latestResult(type){
   return (cloudState?.bridge?.history||[]).find(x=>x.type===type&&x.ok&&x.result)||null;
 }
 // Keep the live file browser state across dashboard re-renders.
-const fileManager={folder:"",entries:null,selected:"",editor:"",query:"",sort:"name",
+const fileManager={folder:"",entries:null,selected:"",editor:"",query:"",sort:"name",tree:null,treeLoading:false,expanded:{},
   busy:false,message:"",error:"",draftDirty:false,loading:false,selectedSize:0};
 const fileJoin=(folder,name)=>folder?folder+"/"+name:name;
 function fileBytes(n){
@@ -399,6 +399,42 @@ async function fileSaveText(){
   // Preserve the last edited file while refreshing the containing folder.
   await fileRefresh(false);
 }
+async function fileLoadTree(){
+  if(fileManager.treeLoading || !isBridgeLive())return;
+  fileManager.treeLoading=true;
+  try{
+    const data=await fileTask("files-tree",{});
+    fileManager.tree=Array.isArray(data.roots)?data.roots:[];
+    if(tab==="files")render();
+  }catch(error){
+    fileManager.error="Could not load server folder tree: "+error.message;
+  }finally{
+    fileManager.treeLoading=false;
+    if(tab==="files")render();
+  }
+}
+function fileTreeNodes(parent,nodes,level=0){
+  for(const node of nodes){
+    const children=Array.isArray(node.children)?node.children:[];
+    const row=proNode(parent,"div","file-tree-entry");
+    row.style.paddingLeft=(level*13+3)+"px";
+    if(children.length){
+      const toggle=proNode(row,"button","file-tree-toggle",
+        fileManager.expanded[node.path]?"▾":"▸");
+      toggle.type="button";toggle.title="Expand or collapse";
+      toggle.onclick=()=>{
+        fileManager.expanded[node.path]=!fileManager.expanded[node.path];
+        render();
+      };
+    }else proNode(row,"span","file-tree-no-toggle","·");
+    const button=proNode(row,"button","file-tree-link"+(fileManager.folder===node.path?" current":""),
+      "📁 "+node.name);
+    button.type="button";button.disabled=!isBridgeLive()||fileManager.busy;
+    button.onclick=()=>fileOpenFolder(node.path);
+    if(children.length && fileManager.expanded[node.path])
+      fileTreeNodes(parent,children,level+1);
+  }
+}
 async function fileRefresh(keepSelection=true){
   const folder=fileManager.folder;
   const selected=fileManager.selected;
@@ -440,7 +476,11 @@ filesPage=function(p){
     const result=await fileWork(()=>fileTask("files-mkdir",{path:fileJoin(fm.folder,name)}),"Folder created");
     if(result!==undefined)await fileRefresh();
   },"outline",!live||fm.busy));
-  const upload=proNode(toolbar,"input","file-upload-input");upload.type="file";
+  const upload=proNode(toolbar,"input","file-native-input");upload.type="file";
+  upload.id="server-file-upload";
+  const choose=proNode(toolbar,"label","btn primary file-pick-button","⬆ Upload files");
+  choose.setAttribute("for",upload.id);
+  choose.title="Choose text or configuration files to upload";
   upload.accept=".txt,.json,.yml,.yaml,.properties,.cfg,.conf,.toml,.md,.log";
   upload.multiple=true;upload.disabled=!live||fm.busy;upload.title="Upload UTF-8 text/config files (256 KiB maximum each)";
   upload.onchange=async()=>{
@@ -461,6 +501,7 @@ filesPage=function(p){
       const result=await fileWork(()=>fileTask("files-upload",{path:target,content:btoa(binary)}),"Uploaded "+file.name);
       if(result===undefined)break;
     }
+    upload.value="";
     await fileRefresh();
   };
   const crumb=proNode(panel,"nav","file-breadcrumb");
@@ -473,9 +514,24 @@ filesPage=function(p){
     node.type="button";node.disabled=!live||fm.busy;
     node.onclick=()=>fileOpenFolder(segments.slice(0,i+1).join("/"));
   });
-  const tools=proNode(panel,"div","file-list-tools");
+  const layout=proNode(panel,"div","file-explorer-layout");
+  const tree=proNode(layout,"aside","file-tree");
+  proNode(tree,"div","file-tree-heading","SERVER DIRECTORY");
+  const treeRoot=proNode(tree,"button","file-tree-root"+(!fm.folder?" current":""),"🖥️  Server root");
+  treeRoot.type="button";treeRoot.disabled=!live||fm.busy;
+  treeRoot.onclick=()=>fileOpenFolder("");
+  if(fm.tree)fileTreeNodes(tree,fm.tree);
+  else proNode(tree,"p","muted small","Loading folder structure…");
+  const explorer=proNode(layout,"div","file-explorer-main");
+  const tools=proNode(explorer,"div","file-list-tools");
   const filter=proField(tools,"Search files in this folder");
-  filter.value=fm.query;filter.oninput=()=>{fm.query=filter.value;render()};
+  filter.value=fm.query;
+  filter.oninput=()=>{
+    fm.query=filter.value;
+    explorer.querySelectorAll(".file-entry").forEach(row=>{
+      row.hidden=!row.dataset.name.includes(fm.query.toLowerCase());
+    });
+  };
   const sort=proNode(tools,"select");sort.title="Sort files";
   for(const [value,label] of [["name","Name"],["size","Size"],["date","Modified"]]){
     const option=proNode(sort,"option","",label);option.value=value;
@@ -487,7 +543,8 @@ filesPage=function(p){
     fm.loading=true;
     fileOpenFolder(fm.folder).finally(()=>{fm.loading=false});
   }
-  if(!fm.entries)proNode(panel,"div","file-empty","Open the server to load its files.");
+  if(!fm.tree && !fm.treeLoading && live)fileLoadTree();
+  if(!fm.entries)proNode(explorer,"div","file-empty",live?"Loading live server files…":"Start the server to browse its files.");
   else{
     let entries=fm.entries.filter(item=>item.name.toLowerCase().includes(fm.query.toLowerCase()));
     entries.sort((a,b)=>{
@@ -496,14 +553,15 @@ filesPage=function(p){
       if(fm.sort==="date")return (b.modified||0)-(a.modified||0)||a.name.localeCompare(b.name);
       return a.name.localeCompare(b.name,undefined,{sensitivity:"base",numeric:true});
     });
-    const head=proNode(panel,"div","file-list-header");
+    const head=proNode(explorer,"div","file-list-header");
     proNode(head,"span","","Name");
     proNode(head,"span","","Size");
     proNode(head,"span","","Modified");
     proNode(head,"span","","Actions");
-    const table=proNode(panel,"div","file-list");
+    const table=proNode(explorer,"div","file-list");
     for(const item of entries){
       const row=proNode(table,"div","file-entry");
+      row.dataset.name=item.name.toLowerCase();
       const name=proNode(row,"button","file-entry-name",item.type==="dir"?"📁  "+item.name:"📄  "+item.name);
       name.type="button";name.disabled=!live||fm.busy;
       name.onclick=()=>item.type==="dir"?fileOpenFolder(item.path):fileOpenText(item.path);
@@ -532,8 +590,8 @@ filesPage=function(p){
       },"danger",!live||fm.busy));
     }
     if(!entries.length)proNode(table,"div","file-empty",fm.query?"No matching files":"This folder is empty.");
-    if(fm.truncated)proNotice(panel,"Only the first 500 entries are shown. Narrow down the folder or use another directory.");
-    proNode(panel,"div","muted small",entries.length+" entries · "+(fm.folder||"Server root"));
+    if(fm.truncated)proNotice(explorer,"Only the first 500 entries are shown. Narrow down the folder or use another directory.");
+    proNode(explorer,"div","muted small",entries.length+" entries · "+(fm.folder||"Server root"));
   }
   if(fm.selected){
     const editor=proPanel(p,"Edit · "+fm.selected);
@@ -561,7 +619,13 @@ pluginsPage=function(p){
   if(!cloudState){cloudUnlock(p);return}
   const panel=proPanel(p,"Plugin manager");
   proNode(panel,"p","muted small","Upload, enable, disable, or remove Paper plugins. Changes take effect after a safe server restart.");
-  const input=proNode(panel,"input");input.type="file";input.accept=".jar";
+  const picker=proNode(panel,"div","file-pick-area");
+  const input=proNode(picker,"input","file-native-input");input.type="file";input.accept=".jar";
+  input.id="plugin-jar-upload";
+  const choosePlugin=proNode(picker,"label","btn outline file-pick-button","＋ Select plugin JAR");
+  choosePlugin.setAttribute("for",input.id);
+  const selectedName=proNode(picker,"span","muted small","No plugin selected");
+  input.onchange=()=>{selectedName.textContent=input.files?.[0]?.name||"No plugin selected"};
   const row=proNode(panel,"div","dashboard-actions");
   row.append(proAction("Upload plugin",async()=>{
     const file=input.files?.[0];
