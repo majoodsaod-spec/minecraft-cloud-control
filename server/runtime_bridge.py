@@ -21,7 +21,7 @@ MAX_FILE = 256 * 1024
 
 
 class LiveBridge:
-    def __init__(self, data: Path, session: str, players: set, lock, log_lines, ready, send, restart_event, shutdown_event, observed):
+    def __init__(self, data: Path, session: str, players: set, lock, log_lines, ready, send, restart_event, shutdown_event, observed, paper_pid):
         self.data=data.resolve()
         self.session=session
         self.players=players
@@ -32,6 +32,7 @@ class LiveBridge:
         self.restart_event=restart_event
         self.shutdown_event=shutdown_event
         self.observed=observed
+        self.paper_pid=paper_pid
         self.url=os.environ.get("CLOUDFLARE_CONTROL_URL", "").rstrip("/")
         self.token=os.environ.get("CLOUDFLARE_BRIDGE_TOKEN", "")
         self.acked=deque(maxlen=50)
@@ -146,6 +147,15 @@ class LiveBridge:
             return "File deleted; deletion captured at next backup"
         raise ValueError("Unsupported command")
 
+    def _memory_mb(self):
+        try:
+            for line in Path(f"/proc/{self.paper_pid}/status").read_text().splitlines():
+                if line.startswith("VmRSS:"):
+                    return round(int(line.split()[1]) / 1024, 1)
+        except (OSError,ValueError,IndexError):
+            pass
+        return None
+
     def _loop(self):
         while not self.restart_event.is_set() and not self.shutdown_event.is_set():
             with self.lock:
@@ -157,7 +167,7 @@ class LiveBridge:
             uptime=max(0,int(now-self.started))
             status={"ready":self.ready.is_set(),"players":players,"logs":logs,
                     "uptime":uptime,"restartIn":max(0,19800-uptime),
-                    "idleRestartIn":idle_remaining,
+                    "idleRestartIn":idle_remaining,"memoryMiB":self._memory_mb(),"memoryLimitMiB":3072,
                     "phase":"running" if self.ready.is_set() else "starting"}
             outgoing=list(self.acked)
             try:
