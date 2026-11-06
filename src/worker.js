@@ -140,7 +140,7 @@ async function handleControl(request, env) {
       values[name]=enabled;
       await github(env,"/contents/"+file,{method:"PUT",body:JSON.stringify({
         branch:"main",message:(enabled?"Enable ":"Disable ")+name+" on next startup",
-        content:encodeText(JSON.stringify(values,null,2)+"\\n"),...(current?{sha:current.sha}:{})
+        content:encodeText(JSON.stringify(values,null,2)+"\n"),...(current?{sha:current.sha}:{})
       })});
       return json({ok:true,message:name+(enabled?" enabled":" disabled")+" for the next server start"});
     }
