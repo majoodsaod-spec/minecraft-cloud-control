@@ -28,9 +28,9 @@ async function cloudRefresh(showToast=false) {
     const badge=document.querySelector(".top .badge");
     if(badge) badge.innerHTML='<span class="dot"></span> '+(cloudState.active.length?"Workflow running":"Connected to GitHub");
     const foot=document.querySelector(".navfoot");
-    if(foot) foot.textContent="Cloudflare ↔ GitHub controls enabled";
+    if(foot) foot.textContent="Live server controls connected";
     if(showToast) toast("Latest GitHub status loaded");
-    if(["worlds","about","players"].includes(tab)) render();
+    if(["worlds","about"].includes(tab)) render();
   } catch(e) {
     cloudError=e.message;
     if(/Unauthorized|not configured/i.test(e.message)){
@@ -56,7 +56,7 @@ async function cloudAction(action, data, promptText) {
 }
 function cloudUnlock(parent) {
   const box=element("div","panel section");
-  box.innerHTML='<div class="dashboard-kicker">SECURE CONNECTION</div><h2>Connect Minecraft Cloud</h2><p class="muted small">Enter the administrator password from your Cloudflare Worker secrets. GitHub credentials remain on the backend, not in your browser.</p>';
+  box.innerHTML='<div class="dashboard-kicker">SECURE CONNECTION</div><h2>Connect Minecraft Cloud</h2><p class="muted small">Enter the administrator password from your Cloudflare Worker secrets. Your private control credentials stay on the server.</p>';
   const input=element("input"); input.type="password"; input.autocomplete="off"; input.placeholder="Cloudflare admin password";
   const btn=button("Connect",async()=>{
     cloudPassword=input.value;
