@@ -39,6 +39,8 @@ class LiveBridge:
         self.seen=set()
         self.started=time.monotonic()
         self.thread=None
+        self._failures=0
+        self._last_failure=""
 
     def start(self):
         if not self.url or not self.token:
@@ -183,6 +185,35 @@ class LiveBridge:
                     except Exception as exc:
                         self.acked.append({"id":cid,"type":command.get("type"),"ok":False,"result":str(exc)})
                 if len(self.seen)>1000:self.seen=set(list(self.seen)[-250:])
+            except urllib.error.HTTPError as exc:
+                self._failures += 1
+                status = exc.code
+                if status == 401:
+                    reason = "401 Unauthorized: BRIDGE_TOKEN in Cloudflare must exactly match CLOUDFLARE_BRIDGE_TOKEN in GitHub Actions"
+                elif status == 403:
+                    reason = "403 Forbidden: check Cloudflare Access or firewall rules blocking /api/bridge"
+                elif status == 404:
+                    reason = "404 Not Found: CLOUDFLARE_CONTROL_URL must be the deployed Worker URL (without /api/bridge)"
+                elif status == 503:
+                    reason = "503 Unavailable: Cloudflare Worker has no BRIDGE_TOKEN secret configured"
+                elif status >= 500:
+                    reason = f"{status} Worker error: verify Cloudflare deployment and Durable Object binding"
+                else:
+                    reason = f"HTTP {status}: bridge request rejected"
+                # Print only status and a fixed explanation. Never log request headers,
+                # secret values or arbitrary HTML error bodies.
+                if reason != self._last_failure or self._failures in (1, 5, 12) or self._failures % 60 == 0:
+                    print("Cloudflare bridge connection failed:", reason, flush=True)
+                self._last_failure = reason
             except (urllib.error.URLError,TimeoutError,OSError,ValueError) as exc:
-                print("Cloudflare bridge unavailable (retrying):",type(exc).__name__,flush=True)
-            time.sleep(5)
+                self._failures += 1
+                reason = type(exc).__name__ + ": connection or response problem"
+                if reason != self._last_failure or self._failures in (1, 5, 12) or self._failures % 60 == 0:
+                    print("Cloudflare bridge connection failed:", reason,flush=True)
+                self._last_failure = reason
+            else:
+                if self._failures:
+                    print("Cloudflare bridge reconnected successfully",flush=True)
+                self._failures = 0
+                self._last_failure = ""
+            time.sleep(min(60, 5 * 2 ** min(self._failures // 5, 4)))
