@@ -346,9 +346,8 @@ worldsPage=function(p){
   }
   proNotice(p,"To restore an older snapshot, safely stop the server and wait until the backup upload finishes. Never cancel a running save.");
 };
-const previousRefresh=cloudRefresh;
-cloudRefresh=async function(notify=false){
-  await previousRefresh(notify);
+function updateServerDisplay(){
+  if(!cloudState)return;
   const livePhase=serverPhase();
   const badge=document.querySelector(".top .badge");
   if(badge){
@@ -356,11 +355,11 @@ cloudRefresh=async function(notify=false){
     proNode(badge,"span","dot");
     badge.append(document.createTextNode(" "+phaseInfo[livePhase][0]));
   }
-  if(tab==="overview" && cloudState){
+  if(tab==="overview"){
     if(livePhase!==lastRenderedServerPhase)render();
     else updateLiveMetrics();
   }
-  if(tab==="console" && cloudState){
+  if(tab==="console"){
     const consoleBox=document.querySelector(".pro-console");
     if(consoleBox){
       const nearEnd=consoleBox.scrollHeight-consoleBox.scrollTop-consoleBox.clientHeight<50;
@@ -376,7 +375,7 @@ cloudRefresh=async function(notify=false){
       }
     }
   }
-  if(tab==="files" && cloudState){
+  if(tab==="files"){
     const command=(cloudState.bridge?.history||[]).find(x=>x.type?.startsWith("files-"));
     if(command&&command.id!==lastRenderedFileResult){
       const focused=document.activeElement;
@@ -386,7 +385,7 @@ cloudRefresh=async function(notify=false){
       }
     }
   }
-  if(tab==="players" && cloudState){
+  if(tab==="players"){
     const current=(cloudState.bridge?.status?.players||[]).join(",");
     if(current!==lastRenderedPlayers){
       const focused=document.activeElement;
@@ -396,7 +395,30 @@ cloudRefresh=async function(notify=false){
       }
     }
   }
+}
+const previousRefresh=cloudRefresh;
+cloudRefresh=async function(notify=false){
+  await previousRefresh(notify);
+  updateServerDisplay();
 };
-window.setInterval(()=>{if(cloudPassword&&!document.hidden&&!cloudBusy)cloudRefresh()},5000);
+let liveRefreshPending=false;
+async function cloudLiveRefresh(){
+  if(!cloudPassword||!cloudState||cloudRefreshing||cloudBusy||liveRefreshPending)return;
+  liveRefreshPending=true;
+  try{
+    const result=await cloudApi("live");
+    cloudState.bridge=result.bridge;
+    cloudLastUpdate=Date.now();
+    updateServerDisplay();
+  }catch(error){
+    cloudError=error.message;
+    if(/Unauthorized/i.test(cloudError)){
+      cloudState=null;cloudPassword="";
+      sessionStorage.removeItem("mccloud-admin");
+      render();
+    }
+  }finally{liveRefreshPending=false}
+}
+window.setInterval(()=>{if(cloudPassword&&!document.hidden)cloudLiveRefresh()},5000);
 window.setInterval(()=>{if(cloudPassword&&!document.hidden)updateLiveMetrics()},1000);
 render();
