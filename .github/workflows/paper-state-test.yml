@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 345
     outputs:
-      backed_up: ${{ steps.backup.outputs.ready }}
+      backed_up: ${{ steps.backedup.outputs.ready }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
