@@ -98,7 +98,7 @@ jobs:
             echo "REQUIRE_RESTORE=false" >> "$GITHUB_ENV"
           fi
       - name: Start player tunnel (if configured)
-        if: steps.select.outputs.skip != 'true'
+        if: steps.power.outputs.enabled == 'true' && steps.select.outputs.skip != 'true'
         env:
           PLAYIT_SECRET_KEY: ${{ secrets.PLAYIT_SECRET_KEY }}
         shell: bash
@@ -112,7 +112,7 @@ jobs:
             echo "::warning::PLAYIT_SECRET_KEY is missing; remote players cannot connect to the GitHub runner."
           fi
       - name: Run Paper until restart condition
-        if: steps.select.outputs.skip != 'true'
+        if: steps.power.outputs.enabled == 'true' && steps.select.outputs.skip != 'true'
         shell: bash
         env:
           CLOUDFLARE_CONTROL_URL: ${{ secrets.CLOUDFLARE_CONTROL_URL }}
@@ -120,7 +120,7 @@ jobs:
         run: python server/continuous_paper.py
       - name: Upload verified world backup
         id: backup
-        if: success() && steps.select.outputs.skip != 'true'
+        if: success() && steps.power.outputs.enabled == 'true' && steps.select.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: minecraft-world
@@ -130,7 +130,7 @@ jobs:
           retention-days: 90
           if-no-files-found: error
       - name: Confirm saved and stopped
-        if: success() && steps.select.outputs.skip != 'true'
+        if: success() && steps.power.outputs.enabled == 'true' && steps.select.outputs.skip != 'true'
         env:
           CONTROL_URL: ${{ secrets.CLOUDFLARE_CONTROL_URL }}
           BRIDGE_TOKEN: ${{ secrets.CLOUDFLARE_BRIDGE_TOKEN }}
@@ -144,7 +144,7 @@ jobs:
               "${CONTROL_URL%/}/api/bridge-event" || echo "::warning::Could not update dashboard shutdown status"
           fi
       - name: Mark completed backup
-        if: success() && steps.select.outputs.skip != 'true'
+        if: success() && steps.power.outputs.enabled == 'true' && steps.select.outputs.skip != 'true'
         run: echo "ready=true" >> "$GITHUB_OUTPUT"
         id: backedup
 
