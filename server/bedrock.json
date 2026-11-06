@@ -1,5 +1,5 @@
 {
-  "host": "147.185.221.217",
-  "port": 10743,
-  "note": "Public Bedrock (NetherNet) Playit tunnel address. Connection is not verified; private signaling credentials are only stored in GitHub Actions secrets."
+  "host": "jensen-poorest.tun.ply.gg",
+  "port": 19132,
+  "note": "Public Bedrock (NetherNet) hostname and port confirmed by Geyser registration log. Registration is successful; Xbox reachability still needs testing."
 }
