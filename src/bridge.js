@@ -18,7 +18,11 @@ export class MinecraftBridge {
     if(url.pathname==="/desired"){
       if(!["on","off"].includes(body.desired))return Response.json({error:"Invalid desired state"},{status:400});
       await this.ctx.storage.put("desired",body.desired);
-      if(body.desired==="on") await this.ctx.storage.put("commands",[]);
+      if(body.desired==="on"){
+        await this.ctx.storage.put("commands",[]);
+        const state=await get("status",{});
+        if(!state.session||["stopped","failed"].includes(state.phase))await this.ctx.storage.put("status",{...state,phase:"starting",ready:false,updatedAt:Date.now()});
+      }
       return Response.json({ok:true,desired:body.desired});
     }
     if(url.pathname==="/enqueue"){
@@ -29,10 +33,22 @@ export class MinecraftBridge {
       await this.ctx.storage.put("commands",commands);
       return Response.json({ok:true,id:record.id});
     }
+    if(url.pathname==="/event"){
+      const phase=body.phase;
+      if(!["saving","stopping","backing_up","stopped","failed"].includes(phase))return Response.json({error:"Invalid phase"},{status:400});
+      const current=await get("status",{});
+      const session=String(body.session||"");
+      if(!session|| (current.session && session!==current.session))return Response.json({error:"Wrong server session"},{status:409});
+      const next={...current,phase,ready:false,updatedAt:Date.now(),session,
+        detail:String(body.detail||"").slice(0,180)};
+      await this.ctx.storage.put("status",next);
+      return Response.json({ok:true});
+    }
     if(url.pathname==="/heartbeat"){
       const status=await get("status",{});
       const patch=body.status||{};
       const next={...status,...patch,updatedAt:Date.now(),session:body.session||""};
+      if(["saving","stopping","backing_up","stopped"].includes(status.phase) && patch.phase==="running" && status.session===body.session) next.phase=status.phase;
       const logs=Array.isArray(patch.logs)?patch.logs.slice(-100):[];
       next.logs=logs.map(x=>String(x).slice(0,400));
       next.players=Array.isArray(patch.players)?patch.players.slice(0,100):[];
