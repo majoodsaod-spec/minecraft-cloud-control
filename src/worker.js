@@ -48,7 +48,7 @@ async function bridgeCall(env, route, value) {
   if(!response.ok)throw Error(body.error||"Live control service unavailable");
   return body;
 }
-const liveCommands=new Set(["console","kick","ban","pardon","whitelist-add","whitelist-remove","whitelist-on","whitelist-off","op","deop","save","restart","shutdown","files-list","files-read","files-write","files-delete","files-mkdir","files-rename","files-upload","files-download","plugins-list"]);
+const liveCommands=new Set(["console","kick","ban","pardon","whitelist-add","whitelist-remove","whitelist-on","whitelist-off","op","deop","save","restart","shutdown","files-list","files-tree","files-read","files-write","files-delete","files-mkdir","files-rename","files-upload","files-download","plugins-list"]);
 function validateLiveCommand(body) {
   if(!body||!liveCommands.has(body.type))throw Error("Unknown control operation");
   const args=body.args||{};
