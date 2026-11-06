@@ -4,7 +4,8 @@ const serverPhase = () => {
   if (!cloudState) return "disconnected";
   const bridge=cloudState.bridge||{},state=bridge.status||{},fresh=Boolean(state.session && Date.now()-(state.updatedAt||0)<45000);
   if (["saving","stopping","backing_up","stopped","failed"].includes(state.phase)) {
-    if(state.phase==="stopped" || state.phase==="failed")return cloudState.active.length?"finishing":state.phase;
+    if(state.phase==="stopped")return cloudState.active.length?"finishing":state.phase;
+    if(state.phase==="failed")return state.phase;
     return state.phase;
   }
   if (fresh&&state.ready)return "online";
@@ -238,6 +239,22 @@ worldsPage=function(p){
   const actions=proNode(panel,"div","dashboard-actions");
   actions.append(proAction("Save world now",()=>proCommand("save"),"outline",!isBridgeLive()));
   actions.append(proAction("Save & restart (new backup)",()=>proCommand("restart",{},"Disconnect players, save all data and create a verified backup before restarting?"),"primary",!isBridgeLive()));
+};
+const backupsPage=worldsPage;
+worldsPage=function(p){
+  backupsPage(p);
+  if(!cloudState)return;
+  const box=proPanel(p,"Restore a saved world");
+  proNode(box,"p","muted small","Choose a verified snapshot to restart the server with that world. Restoring an older snapshot replaces newer world progress. The server must be fully stopped first.");
+  const canRestore=!cloudState.active.length;
+  if(!cloudState.backups?.length)proNode(box,"p","muted","There are no verified backups to restore yet.");
+  for(const backup of cloudState.backups||[]){
+    const row=proNode(box,"div","backup-row");
+    const info=proNode(row,"div");
+    proNode(info,"strong","",new Date(backup.created_at).toLocaleString());
+    proNode(info,"div","muted small",(backup.size_in_bytes/1048576).toFixed(1)+" MiB");
+    row.append(proAction("Restore this backup",()=>cloudAction("restore",{run_id:backup.run_id},"Restore this saved world? Any newer world progress will be replaced. The server will start after restoration."),"outline",!canRestore));
+  }
 };
 const previousAbout=aboutPage;
 aboutPage=function(p){
