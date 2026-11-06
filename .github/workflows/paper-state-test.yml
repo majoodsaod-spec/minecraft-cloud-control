@@ -1,0 +1,77 @@
+name: Paper State Preservation Test (3 Cycles)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-lifecycle-test
+  cancel-in-progress: false
+
+jobs:
+  cycle_1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Run first Paper session
+        run: python server/paper_lifecycle.py --cycle 1
+      - name: Upload full Paper state
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-state-cycle-1
+          path: cycle-output/
+          retention-days: 1
+          if-no-files-found: error
+
+  cycle_2:
+    needs: cycle_1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/download-artifact@v4
+        with:
+          name: paper-state-cycle-1
+          path: previous/
+      - name: Restore and run second Paper session
+        run: python server/paper_lifecycle.py --cycle 2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paper-state-cycle-2
+          path: cycle-output/
+          retention-days: 1
+          if-no-files-found: error
+
+  cycle_3:
+    needs: cycle_2
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/download-artifact@v4
+        with:
+          name: paper-state-cycle-2
+          path: previous/
+      - name: Restore and run third Paper session
+        run: python server/paper_lifecycle.py --cycle 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paper-state-cycle-3
+          path: cycle-output/
+          retention-days: 3
+          if-no-files-found: error
