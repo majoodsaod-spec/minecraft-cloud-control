@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 
 USERNAME = re.compile(r"^[A-Za-z0-9_]{3,16}$")
-SAFE_PATH = re.compile(r"^[A-Za-z0-9_./ ()+@,\\[\\]-]+$")
+SAFE_PATH = re.compile(r"^[A-Za-z0-9_./ ()+@,\[\]-]+$")
 TEXT_SUFFIXES = {".txt",".json",".yml",".yaml",".properties",".conf",".cfg",".toml",".log",".md"}
 MAX_FILE = 256 * 1024
 
