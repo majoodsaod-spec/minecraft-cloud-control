@@ -136,36 +136,41 @@ async function handleControl(request, env) {
         return json({error:"Paper agent is offline; live commands require an active session."},409);
       return json(await bridgeCall(env,"enqueue",data),202);
     }
+    const managedPlugins = new Set(["EssentialsX.jar","Chunky.jar","Geyser-Spigot.jar","floodgate-spigot.jar"]);
     if(action==="plugin-upload") {
       const name=input.name,content=input.content;
-      if(typeof name!=="string"||!/^[a-zA-Z0-9_.-]{1,80}\.jar$/.test(name)||name.startsWith("."))
+      if(typeof name!=="string"||!name.endsWith(".jar")||name.length>80||!/^[A-Za-z0-9_.-]+$/.test(name)||name.startsWith("."))
         return json({error:"Invalid plugin filename"},400);
+      if(managedPlugins.has(name))return json({error:"This plugin is managed automatically; use Enable/Disable instead."},409);
       if(typeof content!=="string"||content.length>7000000||!/^[A-Za-z0-9+/]*={0,2}$/.test(content))
         return json({error:"Plugin JAR too large (maximum 5 MiB per upload) or invalid"},400);
       const path="/contents/server/plugins/"+encodeURIComponent(name);
       const existing=await github(env,path).catch(err=>String(err).includes("GitHub 404:")?null:Promise.reject(err));
       await github(env,path,{method:"PUT",body:JSON.stringify({branch:"main",message:"Stage Paper plugin "+name+" from Minecraft Cloud",content,...(existing?{sha:existing.sha}:{})})});
-      return json({ok:true,message:"Plugin staged in GitHub. It will install at the next server restart."});
+      return json({ok:true,message:"Plugin saved. It will install at the next server restart."});
     }
     if(action==="plugin-remove") {
       const name=input.name;
-      if(typeof name!=="string"||!/^[A-Za-z0-9_.-]{1,80}\.jar$/.test(name))return json({error:"Invalid plugin filename"},400);
+      if(typeof name!=="string"||!name.endsWith(".jar")||name.length>80||!/^[A-Za-z0-9_.-]+$/.test(name))return json({error:"Invalid plugin filename"},400);
+      if(managedPlugins.has(name))return json({error:"Built-in managed plugins can be disabled, not deleted."},409);
       const path="/contents/server/plugins/"+encodeURIComponent(name);
       const existing=await github(env,path);
       await github(env,path,{method:"DELETE",body:JSON.stringify({branch:"main",message:"Remove Paper plugin "+name,sha:existing.sha})});
-      return json({ok:true,message:"Plugin removed from GitHub; will disappear on next restart."});
+      return json({ok:true,message:"Plugin removed from configuration; restart to apply."});
     }
     if(action==="plugin-list") {
       const listing=await github(env,"/contents/server/plugins").catch(err=>String(err).includes("GitHub 404:")?[]:Promise.reject(err));
       const stored=await github(env,"/contents/server/plugins/plugins-state.json").catch(err=>String(err).includes("GitHub 404:")?null:Promise.reject(err));
       const enabled=stored?JSON.parse(readText(stored)):{};
-      return json({plugins:Array.isArray(listing)?listing.filter(x=>x.type==="file"&&x.name.endsWith(".jar")).map(x=>({name:x.name,size:x.size,enabled:enabled[x.name]!==false})):[]});
+      const custom=Array.isArray(listing)?listing.filter(x=>x.type==="file"&&x.name.endsWith(".jar")&&!managedPlugins.has(x.name)).map(x=>({name:x.name,size:x.size,managed:false,enabled:enabled[x.name]!==false})):[];
+      const standard=[...managedPlugins].map(name=>({name,size:null,managed:true,enabled:enabled[name]!==false}));
+      return json({plugins:[...standard,...custom]});
     }
     if(action==="plugin-toggle") {
       const name=input.name,enabled=input.enabled;
-      if(typeof name!=="string"||!/^[A-Za-z0-9_.-]{1,80}\.jar$/.test(name)||typeof enabled!=="boolean")
+      if(typeof name!=="string"||!name.endsWith(".jar")||name.length>80||!/^[A-Za-z0-9_.-]+$/.test(name)||typeof enabled!=="boolean")
         return json({error:"Invalid plugin settings"},400);
-      await github(env,"/contents/server/plugins/"+encodeURIComponent(name));
+      if(!managedPlugins.has(name))await github(env,"/contents/server/plugins/"+encodeURIComponent(name));
       const file="server/plugins/plugins-state.json";
       const current=await github(env,"/contents/"+file).catch(err=>String(err).includes("GitHub 404:")?null:Promise.reject(err));
       const values=current?JSON.parse(readText(current)):{};
