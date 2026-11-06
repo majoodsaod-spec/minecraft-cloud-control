@@ -23,24 +23,31 @@ GitHub-hosted runners are temporary CI machines, **not guaranteed always-on game
 
 GitHub cron cannot express exact rolling 30-day intervals; the daily recovery trigger is deliberate. Normal automatic restarts happen much more frequently than once every 30 days.
 
-## Dashboard
+## Cloudflare Worker dashboard deployment
 
-The root `index.html` is a zero-dependency mobile-friendly dashboard for **Cloudflare Pages** (framework preset **None**, build command empty, output directory `/`). The Pages Function `functions/api/control.js` is the authenticated backend for its GitHub Actions controls.
+This repository deploys to the existing **Cloudflare Worker** named `minecraft-cloud-control`, not Cloudflare Pages Functions.
 
-### Required Cloudflare Pages configuration
+- Wrangler config: `wrangler.jsonc` (used by `npx wrangler deploy`).
+- Static website: `public/index.html` and `public/dashboard-live.js`.
+- Secure API script: `src/worker.js`; `/api/*` requests run through the Worker.
+- The old `functions/` Pages Functions folder is intentionally removed. Keep the configured Cloudflare deployment command **`npx wrangler deploy`** and build root as the repository root.
 
-In Cloudflare → Workers & Pages → this Pages project → **Settings → Variables and Secrets**, create encrypted **secrets** for the production environment (and preview environment if you use it):
+### Required Cloudflare setup
 
-- `ADMIN_PASSWORD`: generate a unique, strong administrator password, separate from Minecraft credentials.
-- `GITHUB_TOKEN`: fine-grained GitHub PAT scoped **only** to `majoodsaod-spec/minecraft-cloud-control`, granting Actions **read/write** and Contents **read/write**. Store only in Cloudflare, never in the browser or source files.
+In Cloudflare **Workers & Pages → minecraft-cloud-control → Settings → Variables and Secrets**, set encrypted **secrets** for the Worker:
+
+- `ADMIN_PASSWORD`: a unique, strong password for the dashboard.
+- `GITHUB_TOKEN`: a fine-grained GitHub PAT scoped only to `majoodsaod-spec/minecraft-cloud-control`, with Actions **read/write** and Contents **read/write** permissions.
 - `GITHUB_REPO` (optional): defaults to `majoodsaod-spec/minecraft-cloud-control`.
 
-Redeploy the Pages project after adding secrets. The Cloudflare Pages deployment must support **Pages Functions**; a static-only upload cannot execute `/api/control`. Ideally also protect the entire Pages site with **Cloudflare Access** to restrict visitors before they reach the dashboard. The dashboard prompts for the admin password and stores it only in the current browser tab's `sessionStorage`, never in the repo.
+After the next successful deployment, Cloudflare should allow adding Worker secrets (previously blocked because it was static-assets-only). If not, check the deployment status first. Then redeploy after adding the secrets and open the site. The dashboard prompts for the admin password, which is held in this browser tab's session storage. No GitHub token belongs in the frontend.
 
-### What the dashboard can and cannot control
+Protect the site with **Cloudflare Access** as an additional security layer if possible.
 
-**Connected:** view GitHub workflow state and the 10 most recent backups; request a fresh server run; cancel an active run (unsafe for unsaved progress); change supported `server.properties` settings and commit them to GitHub. Properties are read at the next server session, not hot-applied. Click **Connect** and enter `ADMIN_PASSWORD` to enable these controls.
+### Connected and planned controls
 
-**Not implemented:** real-time Paper console, live player counts/kicks/bans, whitelist commands, arbitrary server file editing, plugin JAR uploads, immediate safe backup, restart-with-save on demand, and direct Cloudflare-to-Playit integration. Those require an authenticated runtime control channel or external persistent backend. The dashboard clearly labels its remaining pages as previews; their local data is not synchronized to Paper.
+**Connected:** see GitHub workflow status; start a workflow; cancel a run (unsafe for unsaved world changes); view the latest backups; commit supported `server.properties` updates for the next session. The server reads `server/server.properties` during startup.
 
-**Important:** GitHub Actions isn't a reliable always-on game host, and a cancelled job may lose changes since the last successful backup. Automatic deletion of backups cannot eliminate storage charges or quota overruns when each world ZIP itself becomes large. Never put secrets in `index.html` or `dashboard-live.js`.
+**Not connected yet:** live console, real-time player list or kicks, direct plugin uploads, arbitrary file manager, instant safe backups, or zero-downtime restarts. The interface leaves these as previews until a protected runtime backend exists.
+
+GitHub Actions is temporary CI infrastructure, not reliable always-on hosting. The workflow deletes backup artifacts older than the newest ten after a successful handoff, but important worlds should also be backed up to durable storage.
