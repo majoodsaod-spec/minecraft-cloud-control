@@ -53,6 +53,26 @@ class PluginInstallerTests(unittest.TestCase):
         with patch.object(managed_plugins,"fetch_json",return_value=versions):
             self.assertEqual(managed_plugins.chunky_build(),("https://cdn.example/Chunky.jar","abc"))
 
+    def test_analyzer_selects_only_current_monitoring_release(self):
+        versions = [
+            {"version_number":"2.9.0","version_type":"release","game_versions":["26.3"],
+             "loaders":["paper"],"files":[{"filename":"old.jar","url":"https://cdn.example/old.jar",
+                                            "hashes":{"sha256":"old"}}]},
+            {"version_number":"3.1.2","version_type":"release","game_versions":["26.3"],
+             "loaders":["paper"],"files":[{"filename":"analyzer.jar","url":"https://cdn.example/analyzer.jar",
+                                            "primary":True,"hashes":{"sha256":"safe"}}]}
+        ]
+        with patch.object(managed_plugins,"fetch_json",return_value=versions):
+            self.assertEqual(managed_plugins.analyzer_build(),("https://cdn.example/analyzer.jar","safe"))
+
+    def test_analyzer_never_falls_back_to_older_entity_cleaner(self):
+        versions = [{"version_number":"2.9.0","version_type":"release",
+                     "game_versions":["26.3"],"loaders":["paper"],
+                     "files":[{"filename":"old.jar","url":"https://cdn.example/old.jar"}]}]
+        with patch.object(managed_plugins,"fetch_json",return_value=versions):
+            with self.assertRaisesRegex(RuntimeError,"No verified"):
+                managed_plugins.analyzer_build()
+
     def test_geyser_floodgate_auth_and_secret_overlay(self):
         folder=self.root/"plugins"
         folder.mkdir()
