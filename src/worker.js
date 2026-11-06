@@ -46,15 +46,27 @@ async function handleControl(request, env) {
   const action = url.searchParams.get("action") || "status";
   try {
     if (request.method === "GET" && action === "status") {
-      const [runs, artifacts, cfg] = await Promise.all([
+      // A failure to list artifacts must not hide server controls or recent runs.
+      const [runsResult, artifactsResult, cfgResult] = await Promise.allSettled([
         github(env, "/actions/workflows/" + workflow + "/runs?per_page=30"),
         github(env, "/actions/artifacts?name=minecraft-world&per_page=100"),
-        github(env, "/contents/server/server.properties").catch(() => null)
+        github(env, "/contents/server/server.properties")
       ]);
+      if (runsResult.status === "rejected") {
+        throw new Error("Cannot read GitHub workflow runs. Check that GITHUB_TOKEN has Actions: Read and write access to the correct private repository. " + runsResult.reason.message);
+      }
+      const runs = runsResult.value;
+      const artifacts = artifactsResult.status === "fulfilled" ? artifactsResult.value : {artifacts:[]};
+      const cfg = cfgResult.status === "fulfilled" ? cfgResult.value : null;
+      const warnings = [];
+      if (artifactsResult.status === "rejected") {
+        warnings.push("Cannot list GitHub backup artifacts. Check token repository access and Actions permissions. " + artifactsResult.reason.message);
+      }
       const active = runs.workflow_runs.filter(r => ["queued","in_progress","waiting","requested","pending"].includes(r.status));
       return json({active: active.map(r=>({id:r.id,status:r.status,html_url:r.html_url,created_at:r.created_at})),
         latest: runs.workflow_runs[0] ? {id:runs.workflow_runs[0].id,status:runs.workflow_runs[0].status,conclusion:runs.workflow_runs[0].conclusion,html_url:runs.workflow_runs[0].html_url}: null,
         backups: artifacts.artifacts.filter(a=>!a.expired).slice(0,10).map(a=>({id:a.id,name:a.name,size_in_bytes:a.size_in_bytes,created_at:a.created_at,run_id:a.workflow_run?.id})),
+        warnings,
         properties: cfg ? readText(cfg) : null});
     }
     if (request.method === "GET") return json({error:"Unknown action"},404);
