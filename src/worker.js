@@ -1,3 +1,5 @@
+import { MinecraftBridge } from "./bridge.js";
+export { MinecraftBridge } from "./bridge.js";
 // Cloudflare Worker handler. Credentials are Worker secrets, never browser assets.
 // Required: ADMIN_PASSWORD, GITHUB_TOKEN. Optional: GITHUB_REPO.
 const workflow = "paper-state-test.yml";
@@ -35,6 +37,28 @@ const encodeText = text => {
   for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
   return btoa(bin);
 };
+const bridgeStub = env => env.MC_BRIDGE.get(env.MC_BRIDGE.idFromName("primary"));
+async function bridgeCall(env, route, value) {
+  const response=await bridgeStub(env).fetch("https://bridge.internal/"+route,{
+    method:value===undefined?"GET":"POST",
+    headers:{"Content-Type":"application/json"},
+    body:value===undefined?undefined:JSON.stringify(value)
+  });
+  const body=await response.json();
+  if(!response.ok)throw Error(body.error||"Live control service unavailable");
+  return body;
+}
+const liveCommands=new Set(["console","kick","ban","pardon","whitelist-add","whitelist-remove","whitelist-on","whitelist-off","op","deop","save","restart","files-list","files-read","files-write","files-delete","plugins-list"]);
+function validateLiveCommand(body) {
+  if(!body||!liveCommands.has(body.type))throw Error("Unknown control operation");
+  const args=body.args||{};
+  if(typeof args!=="object"||Array.isArray(args))throw Error("Invalid command arguments");
+  if(body.type==="console" && (typeof args.command!=="string" || args.command.length>240 || /[\\r\\n]/.test(args.command)))throw Error("Invalid console command");
+  if(["kick","ban","pardon","whitelist-add","whitelist-remove","op","deop"].includes(body.type) && !/^[A-Za-z0-9_]{3,16}$/.test(args.player||""))throw Error("Invalid Minecraft username");
+  if(body.type.startsWith("files-") && (typeof args.path!=="string"||args.path.length>180||args.path.startsWith("/")||args.path.split("/").some(p=>!p||p==="."||p==="..")||/[\\\\\\x00-\\x1f]/.test(args.path)))throw Error("Invalid file path");
+  if(body.type==="files-write"&&(typeof args.content!=="string"||args.content.length>262144))throw Error("File content must be text, maximum 256 KiB");
+  return {type:body.type,args};
+}
 const allowedSettings = new Set(["motd","max-players","difficulty","gamemode","pvp","allow-flight","white-list","enforce-whitelist","online-mode","enable-command-block","spawn-protection","view-distance","simulation-distance","max-world-size","allow-nether","spawn-monsters","spawn-animals","spawn-npcs","hardcore","force-gamemode","player-idle-timeout"]);
 async function handleControl(request, env) {
   if (!env.ADMIN_PASSWORD || !env.GITHUB_TOKEN)
@@ -63,14 +87,46 @@ async function handleControl(request, env) {
         warnings.push("Cannot list GitHub backup artifacts. Check token repository access and Actions permissions. " + artifactsResult.reason.message);
       }
       const active = runs.workflow_runs.filter(r => ["queued","in_progress","waiting","requested","pending"].includes(r.status));
+      const bridge=await bridgeCall(env,"state").catch(()=>({status:{},history:[],commands:[]}));
       return json({active: active.map(r=>({id:r.id,status:r.status,html_url:r.html_url,created_at:r.created_at})),
         latest: runs.workflow_runs[0] ? {id:runs.workflow_runs[0].id,status:runs.workflow_runs[0].status,conclusion:runs.workflow_runs[0].conclusion,html_url:runs.workflow_runs[0].html_url}: null,
         backups: artifacts.artifacts.filter(a=>!a.expired).slice(0,10).map(a=>({id:a.id,name:a.name,size_in_bytes:a.size_in_bytes,created_at:a.created_at,run_id:a.workflow_run?.id})),
         warnings,
+        bridge,
         properties: cfg ? readText(cfg) : null});
     }
     if (request.method === "GET") return json({error:"Unknown action"},404);
     const input = await request.json().catch(()=>({}));
+    if(action==="live-command") {
+      const data=validateLiveCommand(input);
+      const state=await bridgeCall(env,"state");
+      if(!state.status?.session||Date.now()-(state.status.updatedAt||0)>45000)
+        return json({error:"Paper agent is offline; live commands require an active session."},409);
+      return json(await bridgeCall(env,"enqueue",data),202);
+    }
+    if(action==="plugin-upload") {
+      const name=input.name,content=input.content;
+      if(typeof name!=="string"||!/^[a-zA-Z0-9_.-]{1,80}\\.jar$/.test(name)||name.startsWith("."))
+        return json({error:"Invalid plugin filename"},400);
+      if(typeof content!=="string"||content.length>900000||!/^[A-Za-z0-9+/]*={0,2}$/.test(content))
+        return json({error:"Plugin JAR too large (maximum 650 KiB per upload) or invalid"},400);
+      const path="/contents/server/plugins/"+encodeURIComponent(name);
+      const existing=await github(env,path).catch(err=>String(err).includes("GitHub 404:")?null:Promise.reject(err));
+      await github(env,path,{method:"PUT",body:JSON.stringify({branch:"main",message:"Stage Paper plugin "+name+" from Minecraft Cloud",content,...(existing?{sha:existing.sha}:{})})});
+      return json({ok:true,message:"Plugin staged in GitHub. It will install at the next server restart."});
+    }
+    if(action==="plugin-remove") {
+      const name=input.name;
+      if(typeof name!=="string"||!/^[A-Za-z0-9_.-]{1,80}\\.jar$/.test(name))return json({error:"Invalid plugin filename"},400);
+      const path="/contents/server/plugins/"+encodeURIComponent(name);
+      const existing=await github(env,path);
+      await github(env,path,{method:"DELETE",body:JSON.stringify({branch:"main",message:"Remove Paper plugin "+name,sha:existing.sha})});
+      return json({ok:true,message:"Plugin removed from GitHub; will disappear on next restart."});
+    }
+    if(action==="plugin-list") {
+      const listing=await github(env,"/contents/server/plugins").catch(err=>String(err).includes("GitHub 404:")?[]:Promise.reject(err));
+      return json({plugins:Array.isArray(listing)?listing.filter(x=>x.type==="file"&&x.name.endsWith(".jar")).map(x=>({name:x.name,size:x.size})):[]});
+    }
     if (action === "start") {
       await github(env, "/actions/workflows/" + workflow + "/dispatches", {method:"POST",body:JSON.stringify({ref:"main"})});
       return json({ok:true,message:"Workflow requested"});
@@ -114,6 +170,17 @@ async function handleControl(request, env) {
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
+    if(path==="/api/bridge"){
+      if(!env.BRIDGE_TOKEN)return json({error:"Live bridge not configured"},503);
+      const token=(request.headers.get("Authorization")||"").replace(/^Bearer /,"");
+      if(!token||!await equals(token,env.BRIDGE_TOKEN))return json({error:"Unauthorized"},401);
+      if(request.method!=="POST")return json({error:"Method not allowed"},405);
+      try {
+        const input=await request.json();
+        if(!input.session||typeof input.session!=="string"||input.session.length>128)return json({error:"Missing runner session"},400);
+        return json(await bridgeCall(env,"heartbeat",input));
+      }catch(e){return json({error:String(e.message)},400)}
+    }
     if (path === "/api/control") return handleControl(request, env);
     if (path.startsWith("/api/")) return json({error:"Unknown API route"},404);
     return env.ASSETS.fetch(request);
