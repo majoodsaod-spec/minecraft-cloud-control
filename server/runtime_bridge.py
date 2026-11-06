@@ -216,4 +216,6 @@ class LiveBridge:
                     print("Cloudflare bridge reconnected successfully",flush=True)
                 self._failures = 0
                 self._last_failure = ""
-            time.sleep(min(60, 5 * 2 ** min(self._failures // 5, 4)))
+            # Healthy live console should refresh quickly; errors back off so we
+            # do not overload Cloudflare or fill the runner logs.
+            time.sleep(1 if self._failures == 0 else min(60, 5 * 2 ** min(self._failures // 5, 4)))
