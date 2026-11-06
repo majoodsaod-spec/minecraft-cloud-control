@@ -1,0 +1,39 @@
+name: Sync Bounded Paper Test Jobs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - server/lifecycle_config.json
+      - server/generate_cycle_workflow.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: paper-test-workflow-generator
+  cancel-in-progress: false
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Generate the numbered sequential jobs
+        run: python server/generate_cycle_workflow.py
+      - name: Commit regenerated workflow if changed
+        shell: bash
+        run: |
+          if git diff --quiet -- .github/workflows/paper-state-test.yml; then
+            echo "Workflow already matches max_cycles."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/paper-state-test.yml
+          git commit -m "Regenerate bounded Paper test jobs from max_cycles"
+          git push
