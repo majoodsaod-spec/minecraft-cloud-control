@@ -18,6 +18,8 @@ import zipfile
 
 from paper_lifecycle import DATA, OUTPUT, PREV, WORK, CONFIG, SKIP_NAMES, SKIP_FILES, digest, download_paper
 from runtime_bridge import LiveBridge
+from managed_plugins import install_managed_plugins
+from geyser_setup import configure_geyser
 
 IDLE_SECONDS = 3600
 MAX_SECONDS = 5 * 3600 + 30 * 60
@@ -65,6 +67,10 @@ def snapshot() -> None:
                 continue
             rel = path.relative_to(DATA)
             if any(part in SKIP_NAMES for part in rel.parts) or path.name in SKIP_FILES:
+                continue
+            # Geyser's Playit NetherNet signaling token must never enter a
+            # publicly accessible artifact. Re-create config from JAR + secret.
+            if rel.as_posix() == "plugins/Geyser-Spigot/config.yml":
                 continue
             if rel.parts[0] == "paper.jar":
                 continue
@@ -116,7 +122,9 @@ def synchronize_plugins() -> None:
             old.unlink()
     for name, jar in source.items():
         shutil.copyfile(jar, installed / name)
-    print(f"Configured {len(source)} Paper plugin JARs", flush=True)
+    managed = install_managed_plugins(installed, enabled)
+    configure_geyser(DATA)
+    print(f"Configured {len(source)} uploaded and {len(managed)} managed Paper plugins", flush=True)
 
 
 def run(jar: Path) -> None:
