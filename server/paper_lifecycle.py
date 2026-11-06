@@ -185,8 +185,8 @@ def main() -> None:
     args = parser.parse_args()
     config = json.loads(CONFIG.read_text())
     maximum = int(config["max_cycles"])
-    if maximum != 3:
-        raise RuntimeError("This CI demonstration is fixed to exactly 3 bounded cycles")
+    if not 1 <= maximum <= 10:
+        raise RuntimeError("Bounded CI lifecycle test supports 1 through 10 cycles")
     if not 1 <= args.cycle <= maximum:
         raise RuntimeError("Cycle outside configured bounds")
     WORK.mkdir(exist_ok=True)
