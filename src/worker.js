@@ -161,9 +161,12 @@ async function handleControl(request, env) {
       return json({ok:true,message:"Restore requested. The selected backup will become the world for the next server session."});
     }
     if (action === "start") {
+      const latest=await github(env,"/actions/workflows/"+workflow+"/runs?per_page=30");
+      if(latest.workflow_runs.some(r=>["queued","in_progress","waiting","requested","pending"].includes(r.status)))
+        return json({error:"The Minecraft server is already starting or running"},409);
       await bridgeCall(env,"desired",{desired:"on"});
       await github(env, "/actions/workflows/" + workflow + "/dispatches", {method:"POST",body:JSON.stringify({ref:"main"})});
-      return json({ok:true,message:"Workflow requested"});
+      return json({ok:true,message:"Server startup requested"});
     }
     if (action === "stop") {
       const state=await bridgeCall(env,"state");
