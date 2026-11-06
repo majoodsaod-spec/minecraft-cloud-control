@@ -10,10 +10,16 @@ export class MinecraftBridge {
     const get=(key,fallback)=>this.ctx.storage.get(key).then(value=>value??fallback);
     if (request.method==="GET" && url.pathname==="/state") {
       const [status,commands,history]=await Promise.all([get("status",{}),get("commands",[]),get("history",[])]);
-      return Response.json({status,commands:commands.map(({id,type,issuedAt})=>({id,type,issuedAt})),history});
+      const desired=await get("desired","on");
+      return Response.json({status,desired,commands:commands.map(({id,type,issuedAt})=>({id,type,issuedAt})),history});
     }
     if (request.method!=="POST")return new Response("Method not allowed",{status:405});
     const body=await request.json();
+    if(url.pathname==="/desired"){
+      if(!["on","off"].includes(body.desired))return Response.json({error:"Invalid desired state"},{status:400});
+      await this.ctx.storage.put("desired",body.desired);
+      return Response.json({ok:true,desired:body.desired});
+    }
     if(url.pathname==="/enqueue"){
       const commands=await get("commands",[]);
       if(commands.length>=30)return Response.json({error:"Too many pending commands"},{status:429});
@@ -42,7 +48,8 @@ export class MinecraftBridge {
       commands=commands.filter(x=>!acked.has(x.id)&&Date.now()-x.issuedAt<300000);
       await this.ctx.storage.put("commands",commands);
       await this.ctx.storage.put("history",history);
-      return Response.json({commands:commands.slice(0,20)});
+      const desired=await get("desired","on");
+      return Response.json({commands:commands.slice(0,20),desired});
     }
     return new Response("Not found",{status:404});
   }
