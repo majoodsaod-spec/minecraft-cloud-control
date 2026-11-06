@@ -470,7 +470,7 @@ filesPage=function(p){
   toolbar.append(proAction("+ New folder",async()=>{
     const name=prompt("New folder name (inside "+(fm.folder||"server root")+"):");
     if(!name)return;
-    if(!/^[A-Za-z0-9_ ()+@,\\[\\].-]{1,80}$/.test(name)||name==="."||name===".."||name.includes("/")){
+    if(!/^[A-Za-z0-9_ ()+@,.-]{1,80}$/.test(name)||name==="."||name===".."||name.includes("/")){
       toast("Use a simple folder name without slashes");return;
     }
     const result=await fileWork(()=>fileTask("files-mkdir",{path:fileJoin(fm.folder,name)}),"Folder created");
@@ -488,7 +488,7 @@ filesPage=function(p){
     if(!selected.length)return;
     for(const file of selected){
       if(file.size>262144){toast(file.name+": maximum 256 KiB");continue}
-      if(!/\\.(txt|json|yml|yaml|properties|cfg|conf|toml|md|log)$/i.test(file.name)){
+      if(!/\.(txt|json|yml|yaml|properties|cfg|conf|toml|md|log)$/i.test(file.name)){
         toast(file.name+": only text/config files are supported");continue;
       }
       const bytes=new Uint8Array(await file.arrayBuffer());
@@ -577,7 +577,7 @@ filesPage=function(p){
       actions.append(proAction("Rename",async()=>{
         const name=prompt("Rename "+item.name+" to:",item.name);
         if(!name||name===item.name)return;
-        if(!/^[A-Za-z0-9_ ()+@,\\[\\].-]{1,80}$/.test(name)||name==="."||name===".."){
+        if(!/^[A-Za-z0-9_ ()+@,.-]{1,80}$/.test(name)||name==="."||name===".."){
           toast("Invalid name");return;
         }
         const result=await fileWork(()=>fileTask("files-rename",{path:item.path,target:fileJoin(fm.folder,name)}),"Renamed "+item.name);
