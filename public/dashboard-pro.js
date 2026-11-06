@@ -144,7 +144,8 @@ playersPage=function(p){
   if(!cloudState){cloudUnlock(p);return}
   const panel=proPanel(p,"Online players");
   const names=isBridgeLive()?cloudState.bridge.status.players||[]:[];
-  proNode(panel,"p","muted small",isBridgeLive()?names.length+" player(s) online right now.":"Waiting for the running server to connect.");
+  const count=proNode(panel,"p","muted small",isBridgeLive()?names.length+" player(s) online right now.":"Waiting for the running server to connect.");
+  count.id="online-player-count";
   if(!names.length)proNode(panel,"div","empty","Nobody is online.");
   for(const name of names){
     const row=proNode(panel,"div","rowsetting");
@@ -208,6 +209,8 @@ filesPage=function(p){
       },"outline"));
     }
   }
+  const feedback=proNode(panel,"div","muted small","Browse or open a file to see the latest result.");
+  feedback.id="file-operation-status";
   const editor=proPanel(p,"Text editor");
   const path=proField(editor,"Path, e.g. server.properties");path.value=window.mcEditPath||"server.properties";
   const content=proNode(editor,"textarea");content.rows=10;content.placeholder="Open a text file to edit it";
@@ -375,8 +378,19 @@ function updateServerDisplay(){
     badge.append(document.createTextNode(" "+phaseInfo[livePhase][0]));
   }
   if(tab==="overview"){
-    if(livePhase!==lastRenderedServerPhase)render();
-    else updateLiveMetrics();
+    lastRenderedServerPhase=livePhase;
+    const title=document.querySelector(".server-title");
+    const state=document.querySelector(".server-state");
+    const description=document.querySelector(".server-header .muted");
+    const progress=document.querySelector(".server-progress-fill");
+    if(title)title.textContent=phaseInfo[livePhase][0];
+    if(description)description.textContent=phaseInfo[livePhase][1];
+    if(state){state.textContent=phaseInfo[livePhase][0];state.className="server-state "+phaseInfo[livePhase][2]}
+    if(progress){
+      progress.style.width=phaseInfo[livePhase][3]+"%";
+      progress.classList.toggle("progress-flow",["shutdown_requested","saving","stopping","backing_up","finishing","starting"].includes(livePhase));
+    }
+    updateLiveMetrics();
   }
   if(tab==="console"){
     const consoleBox=document.querySelector(".pro-console");
@@ -396,23 +410,22 @@ function updateServerDisplay(){
   }
   if(tab==="files"){
     const command=(cloudState.bridge?.history||[]).find(x=>x.type?.startsWith("files-"));
-    if(command&&["files-list","files-read","files-delete"].includes(command.type)&&command.id!==lastRenderedFileResult){
-      const focused=document.activeElement;
-      if(!focused||!["INPUT","TEXTAREA"].includes(focused.tagName)){
-        lastRenderedFileResult=command.id;
-        render();
-      }
+    if(command && command.id!==lastRenderedFileResult){
+      lastRenderedFileResult=command.id;
+      const feedback=document.getElementById("file-operation-status");
+      if(feedback)feedback.textContent=(command.ok?"Completed: ":"Failed: ")+command.type+
+        (typeof command.result==="string"?" — "+command.result:"");
+      // File manager changes are displayed on explicit Open/Browse actions, not by
+      // destroying a possibly unsaved text editor during background polling.
     }
   }
   if(tab==="players"){
-    const current=(cloudState.bridge?.status?.players||[]).join(",");
-    if(current!==lastRenderedPlayers){
-      const focused=document.activeElement;
-      if(!focused||focused.tagName!=="INPUT"){
-        lastRenderedPlayers=current;
-        render();
-      }
-    }
+    lastRenderedPlayers=(cloudState.bridge?.status?.players||[]).join(",");
+    const current=document.getElementById("online-player-count");
+    if(current)current.textContent=isBridgeLive()?
+      (cloudState.bridge.status.players||[]).length+" player(s) online right now.":
+      "Waiting for the running server to connect.";
+    // Preserve moderation input and menu state during polling.
   }
 }
 const previousRefresh=cloudRefresh;
