@@ -303,6 +303,17 @@ consolePage=function(p){
       saveConsoleHistory()
     }
   };
+  const performance=proPanel(p,"Performance diagnostics");
+  proNode(performance,"p","muted small","Read-only commands that measure performance without deleting items, removing entities or throttling farms.");
+  const diagnostics=proNode(performance,"div","dashboard-actions");
+  for(const [label,command] of [
+    ["TPS and tick times","spark tps"],
+    ["Health report","spark health"],
+    ["Recent lag incidents","perfincidents 5"],
+    ["Performance status","perfstatus"]
+  ]){
+    diagnostics.append(proAction(label,()=>proCommand("console",{command}),"outline",!isBridgeLive()));
+  }
   const history=cloudState.bridge?.history||[];
   const box=proPanel(p,"Recent command results");
   const recent=proNode(box,"div");recent.id="recent-command-results";
