@@ -217,7 +217,26 @@ filesPage=function(p){
   actions.append(proAction("Open file",()=>{window.mcEditPath=path.value;proCommand("files-read",{path:path.value})},"outline",!isBridgeLive()));
   actions.append(proAction("Save file",()=>proCommand("files-write",{path:path.value,content:content.value},"Save this server file? It will persist after the next verified backup."),"primary",!isBridgeLive()));
   actions.append(proAction("Delete file",()=>proCommand("files-delete",{path:path.value},"Permanently delete this configuration file from the running server?"),"danger",!isBridgeLive()));
-  proNotice(editor,"Files are saved on the running server. Changes are preserved in the next clean backup; stop safely before the runner expires.");
+  actions.append(proAction("Download text",()=>{
+    const blob=new Blob([content.value],{type:"text/plain"});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement("a");
+    link.href=url;link.download=(path.value.split("/").pop()||"server-file.txt");
+    link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  },"outline"));
+  const upload=proNode(editor,"input");
+  upload.type="file";
+  upload.accept=".txt,.json,.yml,.yaml,.properties,.cfg,.conf,.toml,.md,.log";
+  upload.addEventListener("change",async()=>{
+    const file=upload.files?.[0];
+    if(!file)return;
+    if(file.size>262144){proToast("Text files must be 256 KiB or smaller");return}
+    content.value=await file.text();
+    path.value=file.name;
+    window.mcEditPath=file.name;
+    proToast("Text loaded. Use Save file to upload it.");
+  });
+  proNotice(editor,"Only text files up to 256 KiB can be edited here. Server data is preserved in the next clean backup. Use Server Settings for server.properties.");
 };
 pluginsPage=function(p){
   if(!cloudState){cloudUnlock(p);return}
@@ -377,7 +396,7 @@ function updateServerDisplay(){
   }
   if(tab==="files"){
     const command=(cloudState.bridge?.history||[]).find(x=>x.type?.startsWith("files-"));
-    if(command&&command.id!==lastRenderedFileResult){
+    if(command&&["files-list","files-read","files-delete"].includes(command.type)&&command.id!==lastRenderedFileResult){
       const focused=document.activeElement;
       if(!focused||!["INPUT","TEXTAREA"].includes(focused.tagName)){
         lastRenderedFileResult=command.id;
