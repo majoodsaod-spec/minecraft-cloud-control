@@ -124,7 +124,7 @@ function updateLiveMetrics(){
     onlineplayers:isBridgeLive()?String((state.players||[]).length):"—",
     serveruptime:isBridgeLive()?displayDuration((state.uptime||0)+elapsed):"—",
     nextrestart:isBridgeLive()?displayDuration(Math.max(0,(state.restartIn||0)-elapsed)):"—",
-    idlerestart:isBridgeLive()?displayDuration(Math.max(0,(state.idleRestartIn||0)-elapsed)):"—",
+    emptytime:isBridgeLive()?displayDuration((state.players||[]).length?0:Math.max(0,(state.emptyFor||0)+elapsed)):"—",
     memoryusage:isBridgeLive()&&Number.isFinite(state.memoryMiB)?state.memoryMiB.toFixed(0)+" MiB":"—",
     latestbackup:cloudState.backups?.length?new Date(cloudState.backups[0].created_at).toLocaleDateString():"None yet"
   };
@@ -218,7 +218,8 @@ overview=function(p){
     ["Online players",isBridgeLive()?String((live.players||[]).length):"—",isBridgeLive()?"Connected right now":"Waiting for live data"],
     ["Server uptime",isBridgeLive()?displayDuration((live.uptime||0)+(Date.now()-(live.updatedAt||Date.now()))/1000):"—","Current running session"],
     ["Next restart",isBridgeLive()?displayDuration(Math.max(0,live.restartIn-(Date.now()-live.updatedAt)/1000)):"—","Scheduled maximum uptime"],
-    ["Idle restart",isBridgeLive()?displayDuration(Math.max(0,live.idleRestartIn-(Date.now()-live.updatedAt)/1000)):"—","Time since last player joined"],
+    ["Empty time",isBridgeLive()?displayDuration((live.players||[]).length?0:Math.max(0,(live.emptyFor||0)+(Date.now()-(live.updatedAt||Date.now()))/1000)):"—",
+      isBridgeLive()&&((live.players||[]).length>0)?"Players online · timer reset":"Safe restart after 01:00:00 continuously empty"],
     ["Latest backup",cloudState.backups?.length?new Date(cloudState.backups[0].created_at).toLocaleDateString():"None yet","Verified saved snapshot"],
     ["Memory usage",isBridgeLive()&&Number.isFinite(live.memoryMiB)?live.memoryMiB.toFixed(0)+" MiB":"—","Java heap up to 8192 MiB"],
     ["Software","Paper 26.3","Java 25"]
