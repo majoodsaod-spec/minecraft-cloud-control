@@ -98,11 +98,12 @@ async function handleControl(request, env) {
     }
     if (request.method === "GET" && action === "status") {
       // A failure to list artifacts must not hide server controls or recent runs.
-      const [runsResult, artifactsResult, cfgResult, bedrockResult] = await Promise.allSettled([
+      const [runsResult, artifactsResult, cfgResult, bedrockResult, javaResult] = await Promise.allSettled([
         github(env, "/actions/workflows/" + workflow + "/runs?per_page=30"),
         github(env, "/actions/artifacts?name=minecraft-world&per_page=100"),
         github(env, "/contents/server/server.properties"),
-        github(env, "/contents/server/bedrock.json")
+        github(env, "/contents/server/bedrock.json"),
+        github(env, "/contents/server/java.json")
       ]);
       if (runsResult.status === "rejected") {
         throw new Error("Cannot read GitHub workflow runs. Check that GITHUB_TOKEN has Actions: Read and write access to the correct private repository. " + runsResult.reason.message);
@@ -112,6 +113,8 @@ async function handleControl(request, env) {
       const cfg = cfgResult.status === "fulfilled" ? cfgResult.value : null;
       const bedrockCfg = bedrockResult.status === "fulfilled" ? bedrockResult.value : null;
       const bedrock=bedrockCfg ? JSON.parse(readText(bedrockCfg)) : {host:"",port:19132};
+      const javaCfg=javaResult.status==="fulfilled" ? javaResult.value : null;
+      const javaJoin=javaCfg ? JSON.parse(readText(javaCfg)) : {host:""};
       const warnings = [];
       if (artifactsResult.status === "rejected") {
         warnings.push("Cannot list GitHub backup artifacts. Check token repository access and Actions permissions. " + artifactsResult.reason.message);
@@ -131,6 +134,7 @@ async function handleControl(request, env) {
         warnings,
         bridge,
         bedrock:{host:bedrock.host||"",port:bedrock.port||19132,configured:!!bedrock.host},
+        java:{host:javaJoin.host||"",configured:!!javaJoin.host},
         properties: cfg ? readText(cfg) : null});
     }
     if (request.method === "GET") return json({error:"Unknown action"},404);
