@@ -1,53 +1,83 @@
 # Minecraft Cloud Control
 
-Static dashboard plus an experimental Paper Minecraft server lifecycle workflow.
+A server-first, responsive management dashboard for a Paper 26.3 Minecraft Java server running on temporary GitHub Actions runners. The dashboard is a Cloudflare Worker with a securely authenticated bridge to the live Paper process.
 
-## Continuous Paper workflow
+## Start, save, and stop
 
-Use **Actions → Continuous Paper Minecraft Server → Run workflow** to start the first session. Each session restores the most recent verified artifact if one exists, downloads a verified Paper build, starts Paper, and keeps it up until a restart condition:
+The **Start server** button requests a new server session, restores the latest verified world archive (when one exists), synchronizes plugins and configuration, and starts Paper/Playit.
 
-- At **5 hours 30 minutes** of Paper uptime, it warns online players at 5 minutes, 1 minute, and 10 seconds, announces the shutdown, kicks all players, flushes saves, stops Paper, and verifies a ZIP backup.
-- If **no player has joined in 60 minutes**, the same graceful shutdown/backup/restart happens sooner. The timer resets when a player joins.
-- After successful artifact upload, the workflow dispatches a **new workflow run**, which downloads and verifies the exact previous run's snapshot, restores the world, and starts Paper anew. The next session receives a fresh GitHub-hosted runner time limit.
-- A **daily scheduled recovery check** can start a session after a broken handoff. It skips when another run is active. Continuous handoffs already rerun the workflow many times within any 30-day period.
+**Save & stop** is deliberately different from cancelling a job. While the live bridge is connected it requests a safe stop:
 
-The artifact `minecraft-world` preserves world files, playerdata, advancements, inventories and server config, with SHA-256 verification. The workflow retains only the ten newest unexpired `minecraft-world` artifacts, pruning older ones after a verified backup has been uploaded and a successor workflow has been dispatched. Individual artifacts have a maximum retention setting of 90 days (subject to repository policy). Keep an independent off-GitHub backup for important worlds.
+1. Displays a pending shutdown state, then **Saving** when Paper begins shutting down.
+2. Announces the shutdown and kicks every player currently tracked by the server.
+3. Sends `save-all flush` and allows the save to complete before issuing `stop`.
+4. Waits for Paper to exit successfully.
+5. Saves the world, playerdata, inventories, advancements, plugin data, and configuration in a ZIP with SHA-256 verification.
+6. Uploads the verified archive as a `minecraft-world` artifact.
+7. Marks the dashboard **Stopped** only after upload succeeds, and does **not** start another session.
 
-### Player connectivity
+Stopping is refused when the live bridge is offline; it does not silently cancel the workflow or claim that a backup succeeded. If the runner crashes, is forcibly cancelled or times out, unsaved progress can still be lost. Wait for the **Stopped** phase and a new backup entry before treating the save as successful.
 
-GitHub Actions runners have no stable public inbound Minecraft port. To make the server reachable, set the Actions repository secret `PLAYIT_SECRET_KEY` to an existing Playit agent secret and configure a Minecraft Java tunnel in Playit to local TCP port **25565**. The workflow starts the agent through the official container image. Without that secret, Paper is only useful for local CI testing, not external players.
+**Save & restart** follows the same safe sequence and starts a replacement session after a verified backup. Automatic restart occurs at a maximum of 5 hours 30 minutes of Paper uptime, or if no player joins for 60 minutes; these timers and online player counts are reported by the runner. Scheduled recovery respects the persistent dashboard **off** state.
 
-### Operational limitations
+Only the ten newest `minecraft-world` artifacts are retained after successful backup. This is not a substitute for off-platform backups. GitHub Actions is not a reliable always-on host; queueing and restarts can cause downtime, and world saves are not guaranteed if the host disappears.
 
-GitHub-hosted runners are temporary CI machines, **not guaranteed always-on game hosts**. Jobs may be delayed, cancelled, rate-limited, or blocked by GitHub usage limits. There will be downtime while saving, uploading, queueing, restoring, and restarting. Automatic handoff only occurs after a verified, successfully uploaded backup. A runner terminated before clean shutdown cannot guarantee preservation of its latest world changes. Daily recovery is not a substitute for durable always-on hosting.
+## Dashboard features
 
-GitHub cron cannot express exact rolling 30-day intervals; the daily recovery trigger is deliberate. Normal automatic restarts happen much more frequently than once every 30 days.
+| Area | Current implementation |
+| --- | --- |
+| Overview | Paper readiness, online players, uptime, real process memory consumption, maximum-uptime restart countdown, idle restart countdown, latest backup, and animated shutdown progress |
+| Server control | Start, safe Save & Stop, safe Save & Restart; commands require an authenticated live bridge |
+| Server settings | Edit supported `server.properties` values and save persistent settings; apply on next startup |
+| Players | Live tracked usernames; kick, ban, pardon, whitelist, operator controls while Paper is online |
+| Console | Recent live Paper stdout logs, commands, and command acknowledgments; output is not an interactive TTY |
+| File manager | Browse directories, read, edit, and delete small text files. Binary files and live world-data writes are blocked |
+| Plugins | Upload JARs up to 5 MiB, list them, enable/disable or remove; changes apply at next startup |
+| Worlds & backups | List verified backup artifacts, request a runtime world save, perform a safe restart for a complete backup, or restore a selected backup while stopped |
+| Connections | Bridge connection state and runtime configuration information |
 
-## Cloudflare Worker dashboard deployment
+The live bridge polls every 5 seconds, the full dashboard state polls every 30 seconds, and visible countdown values tick once per second. The browser never receives the GitHub token or bridge token. Plugin uploads and file operations are bounded for safety; larger/binary transfers and changing arbitrary live world files are not supported. The console relays commands but cannot guarantee immediate execution or return direct synchronous command responses.
 
-This repository deploys to the existing **Cloudflare Worker** named `minecraft-cloud-control`, not Cloudflare Pages Functions.
+## Deploy the Cloudflare dashboard
 
-- Wrangler config: `wrangler.jsonc` (used by `npx wrangler deploy`).
-- Static website: `public/index.html` and `public/dashboard-live.js`.
-- Secure API script: `src/worker.js`; `/api/*` requests run through the Worker.
-- The old `functions/` Pages Functions folder is intentionally removed. Keep the configured Cloudflare deployment command **`npx wrangler deploy`** and build root as the repository root.
+Keep the existing Cloudflare Worker deployment named `minecraft-cloud-control` with the repository root as the build root and deployment command `npx wrangler deploy`.
 
-### Required Cloudflare setup
+- `wrangler.jsonc`: Worker config, bundled static assets, and a SQLite Durable Object migration.
+- `src/worker.js`: authenticated control API, GitHub API access, and bridge handling.
+- `src/bridge.js`: Durable Object status, desired server state, and queued commands.
+- `public/index.html`, `public/dashboard-theme.css`, `public/dashboard-live.js`, `public/dashboard-pro.js`: dashboard.
+- `server/runtime_bridge.py`: outbound authenticated runner agent.
 
-In Cloudflare **Workers & Pages → minecraft-cloud-control → Settings → Variables and Secrets**, set encrypted **secrets** for the Worker:
+### Cloudflare Worker secrets
 
-- `ADMIN_PASSWORD`: a unique, strong password for the dashboard.
-- `GITHUB_TOKEN`: a fine-grained GitHub PAT scoped only to `majoodsaod-spec/minecraft-cloud-control`, with Actions **read/write** and Contents **read/write** permissions.
-- `GITHUB_REPO` (optional): defaults to `majoodsaod-spec/minecraft-cloud-control`.
+In **Workers & Pages → minecraft-cloud-control → Settings → Variables and Secrets**, set **encrypted**:
 
-After the next successful deployment, Cloudflare should allow adding Worker secrets (previously blocked because it was static-assets-only). If not, check the deployment status first. Then redeploy after adding the secrets and open the site. The dashboard prompts for the admin password, which is held in this browser tab's session storage. No GitHub token belongs in the frontend.
+- `ADMIN_PASSWORD`: unique strong password used to sign in.
+- `GITHUB_TOKEN`: GitHub fine-grained PAT scoped only to `majoodsaod-spec/minecraft-cloud-control`, repository permissions Actions **read/write** and Contents **read/write**.
+- `BRIDGE_TOKEN`: a new random secret of 48+ characters, distinct from the admin password and GitHub token.
+- `GITHUB_REPO` (optional, plain variable): defaults to `majoodsaod-spec/minecraft-cloud-control`.
 
-Protect the site with **Cloudflare Access** as an additional security layer if possible.
+### GitHub Actions repository secrets
 
-### Connected and planned controls
+In **Repository → Settings → Secrets and variables → Actions**, set:
 
-**Connected:** see GitHub workflow status; start a workflow; cancel a run (unsafe for unsaved world changes); view the latest backups; commit supported `server.properties` updates for the next session. The server reads `server/server.properties` during startup.
+- `PLAYIT_SECRET_KEY`: your existing Playit agent secret (rotate it if previously exposed).
+- `CLOUDFLARE_CONTROL_URL`: exact HTTPS dashboard Worker URL, e.g. `https://minecraft-cloud-control.<account>.workers.dev` (without a trailing slash).
+- `CLOUDFLARE_BRIDGE_TOKEN`: **exactly the same secret value** as the Cloudflare Worker `BRIDGE_TOKEN`.
 
-**Not connected yet:** live console, real-time player list or kicks, direct plugin uploads, arbitrary file manager, instant safe backups, or zero-downtime restarts. The interface leaves these as previews until a protected runtime backend exists.
+After updating secrets, deploy Cloudflare successfully and **start a fresh server session**. An already-running runner will not gain newly added Actions secrets until its next workflow run.
 
-GitHub Actions is temporary CI infrastructure, not reliable always-on hosting. The workflow deletes backup artifacts older than the newest ten after a successful handoff, but important worlds should also be backed up to durable storage.
+### Verify operation
+
+1. Check that Cloudflare's most recent deployment succeeded.
+2. Open the dashboard and sign in using `ADMIN_PASSWORD`.
+3. Press Start. Check the server session starts and the bridge reports **Online**.
+4. Verify online player data and the restart countdown. Send a harmless console command such as `say Hello`.
+5. Without players or valuable world changes, try **Save & stop**. Observe **Preparing to stop → Saving → Stopping → Backing up → Stopped** and verify the new artifact exists.
+6. Press Start again and confirm the previous world is restored.
+
+Test before putting valuable worlds on the server. Never place tokens in browser code, screenshots or chat messages. A token ever shown in a screenshot should be revoked and replaced. Protect admin access with Cloudflare Access if available.
+
+## Automatic checks
+
+The `Dashboard checks` workflow validates Python syntax, runs bridge and policy tests, and checks browser/Worker JavaScript syntax after relevant code changes. Passing these tests does not substitute for an actual Cloudflare deployment and end-to-end Paper backup/restore test.
