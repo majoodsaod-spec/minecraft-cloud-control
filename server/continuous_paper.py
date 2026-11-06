@@ -143,7 +143,7 @@ def run(jar: Path) -> None:
     log_lines = deque(maxlen=100)
     bridge_restart = threading.Event()
     bridge_shutdown = threading.Event()
-    observed = {"last_join": time.monotonic(), "count": 0}
+    observed = {"empty_since": time.monotonic(), "count": 0}
     def send(cmd: str) -> None:
         if proc.poll() is None:
             assert proc.stdin is not None
@@ -163,9 +163,13 @@ def run(jar: Path) -> None:
             with lock:
                 if joined:
                     players.add(joined.group(1))
-                    observed["last_join"] = time.monotonic()
+                    observed["empty_since"] = None
                 if left:
                     players.discard(left.group(1))
+                    if not players:
+                        # Start a brand-new 60 minute idle period only when
+                        # the *last* player disconnects.
+                        observed["empty_since"] = time.monotonic()
                 if count:
                     observed["count"] = int(count.group(1))
     threading.Thread(target=logs, daemon=True).start()
@@ -182,6 +186,10 @@ def run(jar: Path) -> None:
             raise RuntimeError("Paper failed to start")
         started = time.monotonic()
         bridge.started = started
+        with lock:
+            # A server with no players begins counting from Paper readiness,
+            # not from the time Java was first launched.
+            observed["empty_since"] = None if players else started
         warned = set()
         # Pregenerate a modest starter area only while no players are online.
         # Chunky saves its own task progress across verified world snapshots.
@@ -211,14 +219,15 @@ def run(jar: Path) -> None:
             elapsed = now - started
             remaining = MAX_SECONDS - elapsed
             with lock:
-                last_join = observed["last_join"]
+                empty_since = observed["empty_since"]
                 online_count = len(players)
+            empty_for = max(0, now - empty_since) if not online_count and empty_since is not None else 0
             if chunky_available and chunky_radius:
                 if pregen_active and online_count:
                     send("chunky pause world")
                     pregen_active = False
                     print("Paused Chunky: a player joined", flush=True)
-                elif not pregen_active and not online_count and now-last_join >= 60 and remaining > 300:
+                elif not pregen_active and not online_count and empty_for >= 60 and remaining > 300:
                     send("chunky continue world")
                     pregen_active = True
                     print("Resumed Chunky: server empty", flush=True)
@@ -235,10 +244,24 @@ def run(jar: Path) -> None:
             if elapsed >= MAX_SECONDS:
                 print("Scheduled 5h30m handoff", flush=True)
                 break
-            if now - last_join >= IDLE_SECONDS:
-                print("No player joined for an hour; restarting", flush=True)
-                send("say No players joined in the past hour. Server restarting in 15 seconds; rejoin shortly.")
-                time.sleep(15)
+            if not online_count and empty_for >= IDLE_SECONDS:
+                print("Server has been continuously empty for an hour; preparing safe restart", flush=True)
+                # Players can still join during the 15 second notice. Cancel
+                # the idle restart immediately if they do.
+                send("say Server has been empty for 1 hour. Restarting in 15 seconds unless someone joins.")
+                canceled = False
+                for _ in range(15):
+                    if STOPPED.is_set() or bridge_shutdown.is_set() or bridge_restart.is_set():
+                        break
+                    time.sleep(1)
+                    with lock:
+                        if players:
+                            canceled = True
+                            break
+                if canceled:
+                    print("Idle restart canceled: a player joined", flush=True)
+                    send("say Idle restart canceled because a player joined.")
+                    continue
                 break
             time.sleep(1)
         if proc.poll() is not None:
