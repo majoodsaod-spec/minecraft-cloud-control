@@ -48,7 +48,7 @@ async function bridgeCall(env, route, value) {
   if(!response.ok)throw Error(body.error||"Live control service unavailable");
   return body;
 }
-const liveCommands=new Set(["console","kick","ban","pardon","whitelist-add","whitelist-remove","whitelist-on","whitelist-off","op","deop","save","restart","shutdown","files-list","files-read","files-write","files-delete","plugins-list"]);
+const liveCommands=new Set(["console","kick","ban","pardon","whitelist-add","whitelist-remove","whitelist-on","whitelist-off","op","deop","save","restart","shutdown","files-list","files-read","files-write","files-delete","files-mkdir","files-rename","files-upload","files-download","plugins-list"]);
 function validateLiveCommand(body) {
   if(!body||!liveCommands.has(body.type))throw Error("Unknown control operation");
   const args=body.args||{};
@@ -57,6 +57,12 @@ function validateLiveCommand(body) {
   if(["kick","ban","pardon","whitelist-add","whitelist-remove","op","deop"].includes(body.type) && !/^[A-Za-z0-9_]{3,16}$/.test(args.player||""))throw Error("Invalid Minecraft username");
   if(body.type.startsWith("files-") && !(body.type==="files-list" && (args.path==="." || args.path==="")) && (typeof args.path!=="string"||args.path.length>180||args.path.startsWith("/")||args.path.split("/").some(p=>!p||p==="."||p==="..")||args.path.split("").some(ch=>ch==="\\"||ch.charCodeAt(0)<32)))throw Error("Invalid file path");
   if(body.type==="files-write"&&(typeof args.content!=="string"||args.content.length>262144))throw Error("File content must be text, maximum 256 KiB");
+  if(body.type==="files-rename" && (typeof args.target!=="string"||args.target.length>180||
+      args.target.startsWith("/")||args.target.split("/").some(p=>!p||p==="."||p==="..")||
+      /[\\\\\\x00-\\x1f]/.test(args.target)))throw Error("Invalid destination name");
+  if(body.type==="files-upload"&&(typeof args.content!=="string"||args.content.length>350000||
+      !/^[A-Za-z0-9+/]*={0,2}$/.test(args.content)))throw Error("Invalid upload (maximum 256 KiB UTF-8 text)");
+
   return {type:body.type,args};
 }
 const allowedSettings = new Set(["motd","max-players","difficulty","gamemode","pvp","allow-flight","white-list","enforce-whitelist","online-mode","enable-command-block","spawn-protection","view-distance","simulation-distance","max-world-size","allow-nether","spawn-monsters","spawn-animals","spawn-npcs","hardcore","force-gamemode","player-idle-timeout"]);
