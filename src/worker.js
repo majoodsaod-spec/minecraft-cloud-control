@@ -69,6 +69,24 @@ async function handleControl(request, env) {
   const url = new URL(request.url);
   const action = url.searchParams.get("action") || "status";
   try {
+    if (request.method === "GET" && action === "diagnostics") {
+      const checks={
+        bridgeSecretConfigured:typeof env.BRIDGE_TOKEN==="string" && env.BRIDGE_TOKEN.length>0,
+        bridgeBindingConfigured:!!env.MC_BRIDGE,
+        githubTokenConfigured:!!env.GITHUB_TOKEN,
+        repository:env.GITHUB_REPO||"majoodsaod-spec/minecraft-cloud-control"
+      };
+      try{
+        const state=await bridgeCall(env,"state");
+        checks.bridgeStorageAvailable=true;
+        checks.lastHeartbeat=state.status?.updatedAt||null;
+        checks.currentPhase=state.status?.phase||"unknown";
+      }catch(error){
+        checks.bridgeStorageAvailable=false;
+        checks.bridgeError=String(error.message||error).slice(0,200);
+      }
+      return json(checks);
+    }
     if (request.method === "GET" && action === "live") {
       return json({bridge:await bridgeCall(env,"state")});
     }
@@ -90,7 +108,14 @@ async function handleControl(request, env) {
         warnings.push("Cannot list GitHub backup artifacts. Check token repository access and Actions permissions. " + artifactsResult.reason.message);
       }
       const active = runs.workflow_runs.filter(r => ["queued","in_progress","waiting","requested","pending"].includes(r.status));
-      const bridge=await bridgeCall(env,"state").catch(()=>({status:{},history:[],commands:[]}));
+      const bridgeResult=await bridgeCall(env,"state").then(
+        value=>({value,error:null}),
+        error=>({value:{status:{},history:[],commands:[],desired:"on"},error})
+      );
+      if(bridgeResult.error){
+        warnings.push("Live server connection is unavailable. Check Worker Durable Object deployment: "+String(bridgeResult.error.message||bridgeResult.error).slice(0,180));
+      }
+      const bridge=bridgeResult.value;
       return json({active: active.map(r=>({id:r.id,status:r.status,html_url:r.html_url,created_at:r.created_at})),
         latest: runs.workflow_runs[0] ? {id:runs.workflow_runs[0].id,status:runs.workflow_runs[0].status,conclusion:runs.workflow_runs[0].conclusion,html_url:runs.workflow_runs[0].html_url}: null,
         backups: artifacts.artifacts.filter(a=>!a.expired).slice(0,10).map(a=>({id:a.id,name:a.name,size_in_bytes:a.size_in_bytes,created_at:a.created_at,run_id:a.workflow_run?.id})),
