@@ -202,7 +202,7 @@ def run(jar: Path) -> None:
                 else:
                     send(f"chunky start world square 0 0 {chunky_radius}")
                     chunky_marker.parent.mkdir(parents=True, exist_ok=True)
-                    chunky_marker.write_text(f"radius={chunky_radius}\\n")
+                    chunky_marker.write_text(f"radius={chunky_radius}\n")
                 pregen_active = True
                 print(f"Chunky starter pre-generation running while empty (radius {chunky_radius} blocks)", flush=True)
         print("Paper online; hard shutdown at 5h30m", flush=True)
