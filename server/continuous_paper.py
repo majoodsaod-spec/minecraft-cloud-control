@@ -123,7 +123,7 @@ def run(jar: Path) -> None:
     synchronize_plugins()
     set_properties()
     proc = subprocess.Popen(
-        ["java", "-Xms512M", "-Xmx3G", "-jar", str(jar), "--nogui"],
+        ["java", "-Xms2G", "-Xmx8G", "-jar", str(jar), "--nogui"],
         cwd=DATA, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, text=True, bufsize=1,
     )
