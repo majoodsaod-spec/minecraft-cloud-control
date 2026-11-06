@@ -1,5 +1,39 @@
 "use strict";
 /* Live Minecraft-centric experience: server facts from the bridge, not guesses. */
+const CONSOLE_STORE="mccloud-console-history";
+const CONSOLE_DRAFT="mccloud-console-draft";
+let consoleSession="";
+let consoleHistory=[];
+try {
+  const saved=JSON.parse(sessionStorage.getItem(CONSOLE_STORE)||"null");
+  if(saved && Array.isArray(saved.lines)){
+    consoleSession=String(saved.session||"");
+    consoleHistory=saved.lines.slice(-400).map(String);
+  }
+}catch{ /* Malformed or unavailable session storage is harmless. */ }
+function accumulateConsole(){
+  const live=cloudState?.bridge?.status||{};
+  const lines=Array.isArray(live.logs)?live.logs.map(String):[];
+  if(!lines.length)return;
+  if(live.session && live.session!==consoleSession){
+    if(consoleHistory.length)consoleHistory.push("— New server session —");
+    consoleSession=live.session;
+  }
+  // The bridge sends a sliding window, so only append lines not already
+  // covered by the tail of the last batch. Repeated polling adds nothing.
+  const max=Math.min(consoleHistory.length,lines.length);
+  let overlap=0;
+  for(let count=max;count>0;count--){
+    if(lines.slice(0,count).every((line,i)=>consoleHistory[consoleHistory.length-count+i]===line)){
+      overlap=count;break;
+    }
+  }
+  if(!overlap && lines.length && consoleHistory.at(-1)===lines.at(-1))return;
+  consoleHistory.push(...lines.slice(overlap));
+  consoleHistory=consoleHistory.slice(-400);
+  try{sessionStorage.setItem(CONSOLE_STORE,JSON.stringify({session:consoleSession,lines:consoleHistory}));}
+  catch{ /* Storage quota may be unavailable. */ }
+}
 const serverPhase = () => {
   if (!cloudState) return "disconnected";
   const bridge=cloudState.bridge||{},state=bridge.status||{},fresh=Boolean(state.session && Date.now()-(state.updatedAt||0)<45000);
@@ -170,13 +204,16 @@ consolePage=function(p){
   if(!cloudState){cloudUnlock(p);return}
   const panel=proPanel(p,"Server console");
   proNode(panel,"p","muted small",isBridgeLive()?"Live server output. Commands are queued and run by Paper.":"Console is available when your server is connected.");
-  const consoleBox=proNode(panel,"pre","console pro-console",(cloudState.bridge?.status?.logs||[]).join("\n")||"No live output yet.");
+  accumulateConsole();
+  const consoleBox=proNode(panel,"pre","console pro-console",consoleHistory.join("\n")||"No live output yet.");
   const form=proNode(panel,"form","console-command-row");
   const input=proField(form,"Type a server command, e.g. say Hello");
   input.autocomplete="off";
+  input.value=sessionStorage.getItem(CONSOLE_DRAFT)||"";
+  input.addEventListener("input",()=>{try{sessionStorage.setItem(CONSOLE_DRAFT,input.value)}catch{}});
   const send=proNode(form,"button","btn primary","Send");
   send.type="submit";send.disabled=!isBridgeLive();
-  form.onsubmit=e=>{e.preventDefault();const cmd=input.value.trim();if(cmd){proCommand("console",{command:cmd});input.value=""}};
+  form.onsubmit=e=>{e.preventDefault();const cmd=input.value.trim();if(cmd){proCommand("console",{command:cmd});input.value="";sessionStorage.removeItem(CONSOLE_DRAFT)}};
   const history=cloudState.bridge?.history||[];
   const box=proPanel(p,"Recent command results");
   const recent=proNode(box,"div");recent.id="recent-command-results";
@@ -392,11 +429,12 @@ function updateServerDisplay(){
     }
     updateLiveMetrics();
   }
+  accumulateConsole();
   if(tab==="console"){
     const consoleBox=document.querySelector(".pro-console");
     if(consoleBox){
       const nearEnd=consoleBox.scrollHeight-consoleBox.scrollTop-consoleBox.clientHeight<50;
-      consoleBox.textContent=(cloudState.bridge?.status?.logs||[]).join("\n")||"No live output yet.";
+      consoleBox.textContent=consoleHistory.join("\n")||"No live output yet.";
       if(nearEnd)consoleBox.scrollTop=consoleBox.scrollHeight;
     }
     const list=document.getElementById("recent-command-results");
