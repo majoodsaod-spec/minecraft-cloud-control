@@ -168,6 +168,7 @@ def run(jar: Path) -> None:
         if not ready.wait(180) or proc.poll() is not None:
             raise RuntimeError("Paper failed to start")
         started = time.monotonic()
+        bridge.started = started
         warned = set()
         print("Paper online; hard shutdown at 5h30m", flush=True)
         while proc.poll() is None and not STOPPED.is_set():
@@ -198,6 +199,7 @@ def run(jar: Path) -> None:
         if proc.poll() is not None:
             raise RuntimeError(f"Paper terminated unexpectedly: {proc.returncode}")
         if not STOPPED.is_set():
+            bridge.phase("saving","Kicking players and saving all world data")
             message = "Server is stopping; world is being saved. Join again later." if bridge_shutdown.is_set() else "Server is restarting; join again shortly."
             send("say " + message)
             with lock:
@@ -205,9 +207,9 @@ def run(jar: Path) -> None:
             for player in current_players:
                 send("kick " + player + " " + message)
             time.sleep(2)
-            time.sleep(2)
         send("save-all flush")
         time.sleep(5)
+        bridge.phase("stopping","World save flushed; stopping the server")
         send("stop")
         proc.wait(timeout=90)
         if proc.returncode != 0:
@@ -222,6 +224,7 @@ def run(jar: Path) -> None:
                 proc.kill()
                 proc.wait()
         if graceful and (DATA / "world" / "level.dat").exists():
+            bridge.phase("backing_up","Creating and verifying world backup")
             snapshot()
         else:
             raise RuntimeError("No verified clean shutdown; refusing backup/automatic handoff")
