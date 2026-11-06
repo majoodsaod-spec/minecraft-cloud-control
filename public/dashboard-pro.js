@@ -322,70 +322,240 @@ consolePage=function(p){
 function latestResult(type){
   return (cloudState?.bridge?.history||[]).find(x=>x.type===type&&x.ok&&x.result)||null;
 }
-filesPage=function(p){
-  if(!cloudState){cloudUnlock(p);return}
-  const panel=proPanel(p,"File manager");
-  proNode(panel,"p","muted small","Browse the server's runtime files. Editing is limited to small text configuration files; world data is protected while the server is online.");
-  const nav=proNode(panel,"div","dashboard-actions");
-  const folder=proField(nav,"Relative folder (empty for root)");
-  folder.value=window.mcFilesPath||"";
-  const browse=()=>{
-    window.mcFilesPath=folder.value.trim();
-    proCommand("files-list",{path:window.mcFilesPath||"."});
-  };
-  nav.append(proAction("Browse folder",browse,"primary",!isBridgeLive()));
-  const result=latestResult("files-list");
-  if(result && Array.isArray(result.result)){
-    const table=proNode(panel,"div","filetable");
-    for(const file of result.result){
-      const row=proNode(table,"div","backup-row");
-      proNode(row,"span","",file.type==="dir"?"📁 "+file.name:"📄 "+file.name);
-      row.append(proAction("Open",()=>{
-        if(file.type==="dir"){folder.value=file.path;browse()}
-        else{window.mcEditPath=file.path;proCommand("files-read",{path:file.path})}
-      },"outline"));
+// Keep the live file browser state across dashboard re-renders.
+const fileManager={folder:"",entries:null,selected:"",editor:"",query:"",sort:"name",
+  busy:false,message:"",error:"",draftDirty:false,loading:false,selectedSize:0};
+const fileJoin=(folder,name)=>folder?folder+"/"+name:name;
+function fileBytes(n){
+  if(!Number.isFinite(n))return "—";
+  if(n<1024)return n+" B";
+  if(n<1048576)return (n/1024).toFixed(1)+" KB";
+  return (n/1048576).toFixed(2)+" MB";
+}
+async function fileTask(type,args={},quiet=false){
+  if(!isBridgeLive())throw Error("Start the Minecraft server to access live files.");
+  const request=await cloudApi("live-command",{type,args});
+  if(!request?.id)throw Error("Server did not acknowledge the file operation");
+  // Files execute on the GitHub runner, not in the Worker; wait for that
+  // exact command acknowledgement to avoid displaying stale file results.
+  for(let attempt=0;attempt<32;attempt++){
+    await new Promise(resolve=>setTimeout(resolve,1000));
+    const live=await cloudApi("live");
+    const result=(live.bridge?.history||[]).find(r=>r.id===request.id);
+    if(result){
+      if(!result.ok)throw Error(String(result.result||"File operation failed"));
+      return result.result;
     }
   }
-  const feedback=proNode(panel,"div","muted small","Browse or open a file to see the latest result.");
-  feedback.id="file-operation-status";
-  const editor=proPanel(p,"Text editor");
-  const path=proField(editor,"Path, e.g. server.properties");path.value=window.mcEditPath||"server.properties";
-  const content=proNode(editor,"textarea");content.rows=10;content.placeholder="Open a text file to edit it";
-  const read=latestResult("files-read");
-  let draft=null;
-  try{draft=JSON.parse(sessionStorage.getItem(FILE_DRAFT)||"null")}catch{}
-  if(draft && draft.path===path.value && typeof draft.content==="string")content.value=draft.content;
-  else if(read?.result?.path===path.value)content.value=read.result.content||"";
-  const persistFileDraft=()=>{
-    try{sessionStorage.setItem(FILE_DRAFT,JSON.stringify({path:path.value,content:content.value}))}catch{}
-  };
-  path.addEventListener("input",persistFileDraft);
-  content.addEventListener("input",persistFileDraft);
-  const actions=proNode(editor,"div","dashboard-actions");
-  actions.append(proAction("Open file",()=>{window.mcEditPath=path.value;sessionStorage.removeItem(FILE_DRAFT);proCommand("files-read",{path:path.value})},"outline",!isBridgeLive()));
-  actions.append(proAction("Save file",()=>{persistFileDraft();proCommand("files-write",{path:path.value,content:content.value},"Save this server file? It will persist after the next verified backup.")},"primary",!isBridgeLive()));
-  actions.append(proAction("Delete file",()=>proCommand("files-delete",{path:path.value},"Permanently delete this configuration file from the running server?"),"danger",!isBridgeLive()));
-  actions.append(proAction("Download text",()=>{
-    const blob=new Blob([content.value],{type:"text/plain"});
-    const url=URL.createObjectURL(blob);
-    const link=document.createElement("a");
-    link.href=url;link.download=(path.value.split("/").pop()||"server-file.txt");
-    link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
-  },"outline"));
-  const upload=proNode(editor,"input");
-  upload.type="file";
+  throw Error("No server response yet. Refresh the folder before retrying.");
+}
+async function fileWork(operation,success){
+  if(fileManager.busy)return;
+  fileManager.busy=true;fileManager.error="";fileManager.message="Working on the server…";
+  if(tab==="files")render();
+  try{
+    const result=await operation();
+    fileManager.message=success||"Completed successfully";
+    return result;
+  }catch(e){
+    fileManager.error=e.message||String(e);
+    fileManager.message="";
+    toast(fileManager.error);
+    return undefined;
+  }finally{
+    fileManager.busy=false;
+    if(tab==="files")render();
+  }
+}
+async function fileOpenFolder(folder){
+  if(fileManager.draftDirty && !confirm("Discard unsaved editor changes and open another folder?"))return;
+  const result=await fileWork(()=>fileTask("files-list",{path:folder||"."}),"Folder loaded");
+  if(!result)return;
+  fileManager.folder=result.path==="."?"":result.path||"";
+  fileManager.entries=result.entries||[];
+  fileManager.truncated=!!result.truncated;
+  fileManager.selected="";
+  fileManager.editor="";
+  fileManager.draftDirty=false;
+  fileManager.message="";
+  if(tab==="files")render();
+}
+async function fileOpenText(path){
+  if(fileManager.draftDirty && fileManager.selected!==path &&
+     !confirm("Discard unsaved changes to the current file?"))return;
+  const result=await fileWork(()=>fileTask("files-read",{path}),"File opened");
+  if(!result)return;
+  fileManager.selected=path;
+  fileManager.editor=String(result.content||"");
+  fileManager.draftDirty=false;
+  if(tab==="files")render();
+}
+async function fileSaveText(){
+  const path=fileManager.selected;
+  if(!path)return;
+  const result=await fileWork(()=>fileTask("files-write",{path,content:fileManager.editor}),"Saved "+path);
+  if(result===undefined)return;
+  fileManager.draftDirty=false;
+  // Preserve the last edited file while refreshing the containing folder.
+  await fileRefresh(false);
+}
+async function fileRefresh(keepSelection=true){
+  const folder=fileManager.folder;
+  const selected=fileManager.selected;
+  const editor=fileManager.editor;
+  const dirty=fileManager.draftDirty;
+  const result=await fileWork(()=>fileTask("files-list",{path:folder||"."}),"Folder refreshed");
+  if(!result)return;
+  fileManager.entries=result.entries||[];
+  fileManager.truncated=!!result.truncated;
+  if(keepSelection){fileManager.selected=selected;fileManager.editor=editor;fileManager.draftDirty=dirty;}
+  if(tab==="files")render();
+}
+function fileDownload(name,content){
+  const binary=atob(content);
+  const data=new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++)data[i]=binary.charCodeAt(i);
+  const blob=new Blob([data],{type:"application/octet-stream"});
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement("a");
+  link.href=url;link.download=name;document.body.appendChild(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+filesPage=function(p){
+  if(!cloudState){cloudUnlock(p);return}
+  const live=isBridgeLive(), fm=fileManager;
+  const panel=proPanel(p,"Server files");
+  proNode(panel,"p","muted small","Browse the actual running Paper server. Changes persist through verified backups after a safe shutdown.");
+  if(!live)proNotice(panel,"The server must be online for live file access. The last folder list may be out of date.");
+  const toolbar=proNode(panel,"div","dashboard-actions file-toolbar");
+  toolbar.append(proAction("⌂ Root",()=>fileOpenFolder(""),"outline",!live||fm.busy));
+  toolbar.append(proAction("↑ Up",()=>fileOpenFolder(fm.folder.split("/").slice(0,-1).join("/")),"outline",!live||fm.busy||!fm.folder));
+  toolbar.append(proAction("⟳ Refresh",()=>fileRefresh(),"outline",!live||fm.busy));
+  toolbar.append(proAction("+ New folder",async()=>{
+    const name=prompt("New folder name (inside "+(fm.folder||"server root")+"):");
+    if(!name)return;
+    if(!/^[A-Za-z0-9_ ()+@,\\[\\].-]{1,80}$/.test(name)||name==="."||name===".."||name.includes("/")){
+      toast("Use a simple folder name without slashes");return;
+    }
+    const result=await fileWork(()=>fileTask("files-mkdir",{path:fileJoin(fm.folder,name)}),"Folder created");
+    if(result!==undefined)await fileRefresh();
+  },"outline",!live||fm.busy));
+  const upload=proNode(toolbar,"input","file-upload-input");upload.type="file";
   upload.accept=".txt,.json,.yml,.yaml,.properties,.cfg,.conf,.toml,.md,.log";
-  upload.addEventListener("change",async()=>{
-    const file=upload.files?.[0];
-    if(!file)return;
-    if(file.size>262144){proToast("Text files must be 256 KiB or smaller");return}
-    content.value=await file.text();
-    path.value=file.name;
-    window.mcEditPath=file.name;
-    persistFileDraft();
-    proToast("Text loaded. Use Save file to upload it.");
+  upload.multiple=true;upload.disabled=!live||fm.busy;upload.title="Upload UTF-8 text/config files (256 KiB maximum each)";
+  upload.onchange=async()=>{
+    const selected=[...(upload.files||[])];
+    if(!selected.length)return;
+    for(const file of selected){
+      if(file.size>262144){toast(file.name+": maximum 256 KiB");continue}
+      if(!/\\.(txt|json|yml|yaml|properties|cfg|conf|toml|md|log)$/i.test(file.name)){
+        toast(file.name+": only text/config files are supported");continue;
+      }
+      const bytes=new Uint8Array(await file.arrayBuffer());
+      try{new TextDecoder("utf-8",{fatal:true}).decode(bytes)}
+      catch{toast(file.name+": not UTF-8 text");continue}
+      let binary="";
+      for(let i=0;i<bytes.length;i+=8192)
+        binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+      const target=fileJoin(fm.folder,file.name);
+      const result=await fileWork(()=>fileTask("files-upload",{path:target,content:btoa(binary)}),"Uploaded "+file.name);
+      if(result===undefined)break;
+    }
+    await fileRefresh();
+  };
+  const crumb=proNode(panel,"nav","file-breadcrumb");
+  const segments=fm.folder?fm.folder.split("/"):[];
+  const root=proNode(crumb,"button","file-crumb","Server");
+  root.type="button";root.disabled=!live||fm.busy;root.onclick=()=>fileOpenFolder("");
+  segments.forEach((segment,i)=>{
+    proNode(crumb,"span","muted","/");
+    const node=proNode(crumb,"button","file-crumb",segment);
+    node.type="button";node.disabled=!live||fm.busy;
+    node.onclick=()=>fileOpenFolder(segments.slice(0,i+1).join("/"));
   });
-  proNotice(editor,"Only text files up to 256 KiB can be edited here. Server data is preserved in the next clean backup. Use Server Settings for server.properties.");
+  const tools=proNode(panel,"div","file-list-tools");
+  const filter=proField(tools,"Search files in this folder");
+  filter.value=fm.query;filter.oninput=()=>{fm.query=filter.value;render()};
+  const sort=proNode(tools,"select");sort.title="Sort files";
+  for(const [value,label] of [["name","Name"],["size","Size"],["date","Modified"]]){
+    const option=proNode(sort,"option","",label);option.value=value;
+  }
+  sort.value=fm.sort;sort.onchange=()=>{fm.sort=sort.value;render()};
+  if(fm.busy)proNode(panel,"p","muted small","⏳ "+fm.message);
+  if(fm.error)proNotice(panel,fm.error);
+  if(!fm.entries && !fm.loading && live){
+    fm.loading=true;
+    fileOpenFolder(fm.folder).finally(()=>{fm.loading=false});
+  }
+  if(!fm.entries)proNode(panel,"div","file-empty","Open the server to load its files.");
+  else{
+    let entries=fm.entries.filter(item=>item.name.toLowerCase().includes(fm.query.toLowerCase()));
+    entries.sort((a,b)=>{
+      if(a.type!==b.type)return a.type==="dir"?-1:1;
+      if(fm.sort==="size")return (b.size||0)-(a.size||0)||a.name.localeCompare(b.name);
+      if(fm.sort==="date")return (b.modified||0)-(a.modified||0)||a.name.localeCompare(b.name);
+      return a.name.localeCompare(b.name,undefined,{sensitivity:"base",numeric:true});
+    });
+    const head=proNode(panel,"div","file-list-header");
+    proNode(head,"span","","Name");
+    proNode(head,"span","","Size");
+    proNode(head,"span","","Modified");
+    proNode(head,"span","","Actions");
+    const table=proNode(panel,"div","file-list");
+    for(const item of entries){
+      const row=proNode(table,"div","file-entry");
+      const name=proNode(row,"button","file-entry-name",item.type==="dir"?"📁  "+item.name:"📄  "+item.name);
+      name.type="button";name.disabled=!live||fm.busy;
+      name.onclick=()=>item.type==="dir"?fileOpenFolder(item.path):fileOpenText(item.path);
+      proNode(row,"span","file-entry-meta",item.type==="dir"?"Folder":fileBytes(item.size));
+      proNode(row,"span","file-entry-meta",item.modified?new Date(item.modified).toLocaleDateString():"—");
+      const actions=proNode(row,"div","file-entry-actions");
+      if(item.type==="file"){
+        actions.append(proAction("Download",async()=>{
+          const file=await fileWork(()=>fileTask("files-download",{path:item.path}),"Downloaded "+item.name);
+          if(file?.encoding==="base64")fileDownload(item.name,file.content);
+        },"outline",!live||fm.busy||(item.size||0)>262144));
+      }
+      actions.append(proAction("Rename",async()=>{
+        const name=prompt("Rename "+item.name+" to:",item.name);
+        if(!name||name===item.name)return;
+        if(!/^[A-Za-z0-9_ ()+@,\\[\\].-]{1,80}$/.test(name)||name==="."||name===".."){
+          toast("Invalid name");return;
+        }
+        const result=await fileWork(()=>fileTask("files-rename",{path:item.path,target:fileJoin(fm.folder,name)}),"Renamed "+item.name);
+        if(result!==undefined)await fileRefresh(false);
+      },"outline",!live||fm.busy));
+      if(item.type==="file")actions.append(proAction("Delete",async()=>{
+        if(!confirm("Delete "+item.path+" from the running server? It can only be recovered from an older verified backup."))return;
+        const result=await fileWork(()=>fileTask("files-delete",{path:item.path}),"Deleted "+item.name);
+        if(result!==undefined)await fileRefresh(false);
+      },"danger",!live||fm.busy));
+    }
+    if(!entries.length)proNode(table,"div","file-empty",fm.query?"No matching files":"This folder is empty.");
+    if(fm.truncated)proNotice(panel,"Only the first 500 entries are shown. Narrow down the folder or use another directory.");
+    proNode(panel,"div","muted small",entries.length+" entries · "+(fm.folder||"Server root"));
+  }
+  if(fm.selected){
+    const editor=proPanel(p,"Edit · "+fm.selected);
+    const text=proNode(editor,"textarea","file-text-editor");
+    text.value=fm.editor;text.spellcheck=false;
+    text.readOnly=!live||fm.busy;
+    text.oninput=()=>{fm.editor=text.value;fm.draftDirty=true};
+    const actions=proNode(editor,"div","dashboard-actions");
+    actions.append(proAction(fm.draftDirty?"Save changes *":"Save changes",fileSaveText,"primary",!live||fm.busy));
+    actions.append(proAction("Download",()=>{
+      const blob=new Blob([fm.editor],{type:"text/plain;charset=utf-8"});
+      const url=URL.createObjectURL(blob);const link=document.createElement("a");
+      link.href=url;link.download=fm.selected.split("/").pop();link.click();
+      setTimeout(()=>URL.revokeObjectURL(url),1500);
+    },"outline"));
+    actions.append(proAction("Close editor",()=>{
+      if(fm.draftDirty&&!confirm("Discard unsaved changes?"))return;
+      fm.selected="";fm.editor="";fm.draftDirty=false;render();
+    },"outline"));
+    proNotice(editor,"Live file editing supports UTF-8 text up to 256 KiB. Use Server Settings to edit server.properties.");
+  }
+  proNotice(p,"Safety: world/player files and private credentials cannot be modified here. Binary and large files need offline backup/restore tools. A save or upload is durable only after the next successful verified server backup.");
 };
 pluginsPage=function(p){
   if(!cloudState){cloudUnlock(p);return}
