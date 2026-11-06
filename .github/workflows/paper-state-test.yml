@@ -97,6 +97,9 @@ jobs:
             echo "No existing backup found; first-time new world"
             echo "REQUIRE_RESTORE=false" >> "$GITHUB_ENV"
           fi
+      - name: Install server configuration dependencies
+        if: steps.power.outputs.enabled == 'true' && steps.select.outputs.skip != 'true'
+        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
       - name: Start player tunnel (if configured)
         if: steps.power.outputs.enabled == 'true' && steps.select.outputs.skip != 'true'
         env:
@@ -117,6 +120,7 @@ jobs:
         env:
           CLOUDFLARE_CONTROL_URL: ${{ secrets.CLOUDFLARE_CONTROL_URL }}
           CLOUDFLARE_BRIDGE_TOKEN: ${{ secrets.CLOUDFLARE_BRIDGE_TOKEN }}
+          GEYSER_PLAYIT_CONFIG: ${{ secrets.GEYSER_PLAYIT_CONFIG }}
         run: python server/continuous_paper.py
       - name: Upload verified world backup
         id: backup
