@@ -26,7 +26,7 @@ async function cloudRefresh(showToast=false) {
     cloudLastUpdate=Date.now();
     cloudError="";
     const badge=document.querySelector(".top .badge");
-    if(badge) badge.innerHTML='<span class="dot"></span> '+(cloudState.active.length?"Workflow running":"Connected to GitHub");
+    if(badge) badge.innerHTML='<span class="dot"></span> '+(cloudState.active.length?"Server starting / running":"Server connected");
     const foot=document.querySelector(".navfoot");
     if(foot) foot.textContent="Live server controls connected";
     if(showToast) toast("Latest GitHub status loaded");
@@ -64,6 +64,7 @@ function cloudUnlock(parent) {
       cloudState=await cloudApi("status");
       sessionStorage.setItem("mccloud-admin",cloudPassword);
       toast("Dashboard connected");render();
+      if(typeof updateServerDisplay==="function")updateServerDisplay();
     }catch(e){cloudPassword="";toast(e.message)}
   },"primary");
   const form=element("form","connect-form");
