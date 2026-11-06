@@ -13,8 +13,8 @@ import urllib.parse
 import urllib.request
 import zipfile
 
-ESSENTIALS_URL = "https://github.com/EssentialsX/Essentials/releases/download/2.22.0/EssentialsX-2.22.0.jar"
-ESSENTIALS_SHA256 = "bda4685105977fca2e209820a9f0ad24275bd103390a03236f38e59bfdac58e6"
+ESSENTIALS_RELEASE = "2.22.0"
+ESSENTIALS_API = "https://api.modrinth.com/v2/project/essentialsx/version"
 GEYSER_API = "https://download.geysermc.org/v2/projects/{project}/versions/latest/builds/latest"
 MODRINTH_API = "https://api.modrinth.com/v2/project/chunky/version"
 USER_AGENT = "minecraft-cloud-control/1.0 (Paper plugin installer)"
@@ -66,6 +66,25 @@ def geyser_build(project: str, filename: str) -> tuple[str, str | None]:
     return GEYSER_API.format(project=project) + "/downloads/spigot", checksum
 
 
+def essentials_build() -> tuple[str, str | None]:
+    """Resolve the official release and verify against its published checksum.
+
+    Version 2.22.0 is intended for the supported 26.1.2 API; 26.3 runtime
+    compatibility is checked by Paper at startup and must not be assumed.
+    """
+    versions = fetch_json(ESSENTIALS_API)
+    for version in versions:
+        if version.get("version_number") != ESSENTIALS_RELEASE:
+            continue
+        files = sorted((item for item in version.get("files", [])
+                        if item.get("filename", "").lower().endswith(".jar")),
+                       key=lambda item: not item.get("primary", False))
+        if files:
+            item = files[0]
+            return item["url"], item.get("hashes", {}).get("sha256")
+    raise RuntimeError("Official EssentialsX 2.22.0 release metadata unavailable")
+
+
 def chunky_build() -> tuple[str, str | None]:
     versions = fetch_json(MODRINTH_API)
     for version in versions:
@@ -84,7 +103,7 @@ def chunky_build() -> tuple[str, str | None]:
 def install_managed_plugins(plugins: Path, state: dict[str, bool]) -> list[str]:
     plugins.mkdir(parents=True, exist_ok=True)
     specs = [
-        ("EssentialsX.jar", lambda: (ESSENTIALS_URL, ESSENTIALS_SHA256)),
+        ("EssentialsX.jar", essentials_build),
         ("Chunky.jar", chunky_build),
         ("Geyser-Spigot.jar", lambda: geyser_build("geyser", "spigot")),
         ("floodgate-spigot.jar", lambda: geyser_build("floodgate", "spigot")),
