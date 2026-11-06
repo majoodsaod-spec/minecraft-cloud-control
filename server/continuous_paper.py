@@ -107,7 +107,10 @@ def synchronize_plugins() -> None:
     repo_plugins = WORK.parent / "server" / "plugins"
     installed = DATA / "plugins"
     installed.mkdir(parents=True, exist_ok=True)
-    source = {p.name: p for p in repo_plugins.glob("*.jar")} if repo_plugins.exists() else {}
+    manifest_path = repo_plugins / "plugins-state.json"
+    enabled = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
+    source = {p.name: p for p in repo_plugins.glob("*.jar")
+              if enabled.get(p.name, True)} if repo_plugins.exists() else {}
     for old in installed.glob("*.jar"):
         if old.name not in source:
             old.unlink()
