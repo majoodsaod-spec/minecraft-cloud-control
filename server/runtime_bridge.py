@@ -169,7 +169,7 @@ class LiveBridge:
             uptime=max(0,int(now-self.started))
             status={"ready":self.ready.is_set(),"players":players,"logs":logs,
                     "uptime":uptime,"restartIn":max(0,19800-uptime),
-                    "idleRestartIn":idle_remaining,"memoryMiB":self._memory_mb(),"memoryLimitMiB":3072,
+                    "idleRestartIn":idle_remaining,"memoryMiB":self._memory_mb(),"memoryLimitMiB":8192,
                     "phase":"running" if self.ready.is_set() else "starting"}
             outgoing=list(self.acked)
             try:
