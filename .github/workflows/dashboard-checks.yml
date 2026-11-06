@@ -1,0 +1,39 @@
+name: Dashboard checks
+
+on:
+  push:
+    paths:
+      - "public/**"
+      - "src/**"
+      - "server/**"
+      - "tests/**"
+      - ".github/workflows/dashboard-checks.yml"
+  pull_request:
+    paths:
+      - "public/**"
+      - "src/**"
+      - "server/**"
+      - "tests/**"
+      - ".github/workflows/dashboard-checks.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check server Python syntax
+        run: python -m compileall -q server
+      - name: Run server tests
+        run: python -m unittest discover -s tests -v
+      - name: Check browser JavaScript syntax
+        run: |
+          node --check public/dashboard-live.js
+          node --check public/dashboard-pro.js
+      - name: Check Cloudflare Worker JavaScript syntax
+        run: |
+          node --input-type=module --check < src/worker.js
+          node --input-type=module --check < src/bridge.js
