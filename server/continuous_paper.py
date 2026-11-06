@@ -181,6 +181,28 @@ def run(jar: Path) -> None:
         started = time.monotonic()
         bridge.started = started
         warned = set()
+        # Pregenerate a modest starter area only while no players are online.
+        # Chunky saves its own task progress across verified world snapshots.
+        chunky_available = (DATA / "plugins" / "Chunky.jar").is_file()
+        chunky_marker = DATA / "plugins" / "Chunky" / ".cloud-pregen-started"
+        try:
+            chunky_radius = int(os.environ.get("CHUNKY_PREGEN_RADIUS", "512"))
+        except ValueError:
+            chunky_radius = 512
+        chunky_radius = max(0, min(1024, chunky_radius))
+        pregen_active = False
+        if chunky_available and chunky_radius:
+            with lock:
+                no_players = not players
+            if no_players:
+                if chunky_marker.is_file():
+                    send("chunky continue world")
+                else:
+                    send(f"chunky start world square 0 0 {chunky_radius}")
+                    chunky_marker.parent.mkdir(parents=True, exist_ok=True)
+                    chunky_marker.write_text(f"radius={chunky_radius}\\n")
+                pregen_active = True
+                print(f"Chunky starter pre-generation running while empty (radius {chunky_radius} blocks)", flush=True)
         print("Paper online; hard shutdown at 5h30m", flush=True)
         while proc.poll() is None and not STOPPED.is_set():
             now = time.monotonic()
@@ -188,6 +210,16 @@ def run(jar: Path) -> None:
             remaining = MAX_SECONDS - elapsed
             with lock:
                 last_join = observed["last_join"]
+                online_count = len(players)
+            if chunky_available and chunky_radius:
+                if pregen_active and online_count:
+                    send("chunky pause world")
+                    pregen_active = False
+                    print("Paused Chunky: a player joined", flush=True)
+                elif not pregen_active and not online_count and now-last_join >= 60 and remaining > 300:
+                    send("chunky continue world")
+                    pregen_active = True
+                    print("Resumed Chunky: server empty", flush=True)
             for mark in WARN_AT:
                 if remaining <= mark and mark not in warned and remaining > 0:
                     warned.add(mark)
@@ -217,6 +249,9 @@ def run(jar: Path) -> None:
                 current_players = list(players)
             for player in current_players:
                 send("kick " + player + " " + message)
+            time.sleep(2)
+        if pregen_active:
+            send("chunky pause world")
             time.sleep(2)
         send("save-all flush")
         time.sleep(5)
