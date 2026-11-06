@@ -149,6 +149,28 @@ class LiveBridge:
             return "Graceful shutdown requested; backup will upload before workflow exits"
         if kind=="plugins-list":
             return [{"name":p.name,"bytes":p.stat().st_size} for p in (self.data/"plugins").glob("*.jar")][:100]
+        if kind=="files-tree":
+            # A compact directory-only tree, capped to avoid bloating the
+            # small Durable Object acknowledgement history.
+            budget=[180]
+            def walk(folder,depth):
+                if budget[0]<=0:return []
+                children=[]
+                try:
+                    dirs=sorted(folder.iterdir(),key=lambda p:p.name.lower())
+                except OSError:
+                    return children
+                for entry in dirs:
+                    if budget[0]<=0:break
+                    if entry.is_symlink() or not entry.is_dir():continue
+                    rel=entry.relative_to(self.data).as_posix()
+                    try:self._path(rel)
+                    except (ValueError,OSError):continue
+                    budget[0]-=1
+                    children.append({"name":entry.name,"path":rel,
+                                     "children":walk(entry,depth-1) if depth>0 else []})
+                return children
+            return {"roots":walk(self.data,2),"truncated":budget[0]==0}
         if kind=="files-list":
             relative=args.get("path","")
             base=self.data if relative in (None,"",".") else self._path(relative)
