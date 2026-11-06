@@ -55,7 +55,7 @@ function validateLiveCommand(body) {
   if(typeof args!=="object"||Array.isArray(args))throw Error("Invalid command arguments");
   if(body.type==="console" && (typeof args.command!=="string" || args.command.length>240 || /[\r\n]/.test(args.command)))throw Error("Invalid console command");
   if(["kick","ban","pardon","whitelist-add","whitelist-remove","op","deop"].includes(body.type) && !/^[A-Za-z0-9_]{3,16}$/.test(args.player||""))throw Error("Invalid Minecraft username");
-  if(body.type.startsWith("files-") && !(body.type==="files-list" && (args.path==="." || args.path==="")) && (typeof args.path!=="string"||args.path.length>180||args.path.startsWith("/")||args.path.split("/").some(p=>!p||p==="."||p==="..")||args.path.split("").some(ch=>ch==="\\"||ch.charCodeAt(0)<32)))throw Error("Invalid file path");
+  if(body.type.startsWith("files-") && body.type!=="files-tree" && !(body.type==="files-list" && (args.path==="." || args.path==="")) && (typeof args.path!=="string"||args.path.length>180||args.path.startsWith("/")||args.path.split("/").some(p=>!p||p==="."||p==="..")||args.path.split("").some(ch=>ch==="\\"||ch.charCodeAt(0)<32)))throw Error("Invalid file path");
   if(body.type==="files-write"&&(typeof args.content!=="string"||args.content.length>262144))throw Error("File content must be text, maximum 256 KiB");
   if(body.type==="files-rename" && (typeof args.target!=="string"||args.target.length>180||
       args.target.startsWith("/")||args.target.split("/").some(p=>!p||p==="."||p==="..")||
