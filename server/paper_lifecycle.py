@@ -24,7 +24,12 @@ WORK = ROOT / ".lifecycle-work"
 DATA = WORK / "paper"
 PREV = ROOT / "previous"
 OUTPUT = ROOT / "cycle-output"
-WORLDS = ("world", "world_nether", "world_the_end")
+# Snapshot the entire server data directory, not only dimensions. This includes
+# playerdata, advancements, statistics, inventories/ender chests, plugin data,
+# player UUID lists, config files and world metadata.
+SKIP_NAMES = {"logs", "crash-reports", "cache", ".cache", "libraries"}
+SKIP_FILES = {"session.lock", "usercache.json"}
+
 
 
 def digest(path: Path) -> str:
@@ -54,7 +59,7 @@ def restore(cycle: int) -> None:
             p = Path(entry.filename)
             if p.is_absolute() or ".." in p.parts:
                 raise RuntimeError("Unsafe path in snapshot")
-            if p.parts[0] not in (*WORLDS, "manifest.json"):
+            if p.parts[0] in SKIP_NAMES or p.name in SKIP_FILES or p.parts[0] == "paper.jar":
                 raise RuntimeError("Unexpected snapshot file")
         z.extractall(DATA)
     (DATA / "manifest.json").unlink(missing_ok=True)
@@ -92,9 +97,11 @@ def download_paper(version: str) -> Path:
 
 def run_paper(jar: Path, seconds: int, timeout: int) -> None:
     DATA.mkdir(parents=True, exist_ok=True)
-    (DATA / "eula.txt").write_text("eula=true\n")
+    if not (DATA / "eula.txt").exists():
+        (DATA / "eula.txt").write_text("eula=true\n")
     # Isolated localhost-only CI server; prevent remote player connections.
-    (DATA / "server.properties").write_text(
+    if not (DATA / "server.properties").exists():
+        (DATA / "server.properties").write_text(
         "server-ip=127.0.0.1\nserver-port=25565\nonline-mode=true\n"
         "max-players=1\nview-distance=4\nsimulation-distance=4\n"
         "spawn-protection=0\nmotd=Minecraft Cloud CI lifecycle test\n"
@@ -149,12 +156,15 @@ def snapshot(cycle: int) -> None:
     manifest = json.dumps({"cycle": cycle, "created_utc": int(time.time())}).encode()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=5) as z:
         z.writestr("manifest.json", manifest)
-        for world in WORLDS:
-            directory = DATA / world
-            if directory.exists():
-                for entry in directory.rglob("*"):
-                    if entry.is_file():
-                        z.write(entry, entry.relative_to(DATA).as_posix())
+        for entry in DATA.rglob("*"):
+            if not entry.is_file():
+                continue
+            relative = entry.relative_to(DATA)
+            if any(part in SKIP_NAMES for part in relative.parts) or entry.name in SKIP_FILES:
+                continue
+            if relative.parts[0] == "paper.jar":
+                continue
+            z.write(entry, relative.as_posix())
     (OUTPUT / "worlds.zip.sha256").write_text(digest(archive))
     # Recheck our archive before leaving this job.
     with zipfile.ZipFile(archive) as z:
