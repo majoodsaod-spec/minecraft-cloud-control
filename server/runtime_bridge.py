@@ -21,7 +21,7 @@ MAX_FILE = 256 * 1024
 
 
 class LiveBridge:
-    def __init__(self, data: Path, session: str, players: set, lock, log_lines, ready, send, restart_event, shutdown_event):
+    def __init__(self, data: Path, session: str, players: set, lock, log_lines, ready, send, restart_event, shutdown_event, observed):
         self.data=data.resolve()
         self.session=session
         self.players=players
@@ -31,6 +31,7 @@ class LiveBridge:
         self.send=send
         self.restart_event=restart_event
         self.shutdown_event=shutdown_event
+        self.observed=observed
         self.url=os.environ.get("CLOUDFLARE_CONTROL_URL", "").rstrip("/")
         self.token=os.environ.get("CLOUDFLARE_BRIDGE_TOKEN", "")
         self.acked=deque(maxlen=50)
@@ -150,8 +151,14 @@ class LiveBridge:
             with self.lock:
                 players=sorted(self.players)
                 logs=list(self.log_lines)[-60:]
+            now=time.monotonic()
+            with self.lock:
+                idle_remaining=max(0,3600-int(now-self.observed["last_join"]))
+            uptime=max(0,int(now-self.started))
             status={"ready":self.ready.is_set(),"players":players,"logs":logs,
-                    "uptime":int(time.monotonic()-self.started),"phase":"running" if self.ready.is_set() else "starting"}
+                    "uptime":uptime,"restartIn":max(0,19800-uptime),
+                    "idleRestartIn":idle_remaining,
+                    "phase":"running" if self.ready.is_set() else "starting"}
             outgoing=list(self.acked)
             try:
                 incoming=self._request({"session":self.session,"status":status,"acks":outgoing})
