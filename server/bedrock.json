@@ -1,0 +1,5 @@
+{
+  "host": "",
+  "port": 19132,
+  "note": "Enter the real public Minecraft Bedrock (NetherNet) Playit address in the server dashboard. This is display metadata, not a networking tunnel."
+}
