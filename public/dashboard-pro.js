@@ -2,6 +2,7 @@
 /* Live Minecraft-centric experience: server facts from the bridge, not guesses. */
 const CONSOLE_STORE="mccloud-console-history";
 const CONSOLE_DRAFT="mccloud-console-draft";
+const FILE_DRAFT="mccloud-file-draft";
 let consoleSession="";
 let consoleHistory=[];
 try {
@@ -252,10 +253,18 @@ filesPage=function(p){
   const path=proField(editor,"Path, e.g. server.properties");path.value=window.mcEditPath||"server.properties";
   const content=proNode(editor,"textarea");content.rows=10;content.placeholder="Open a text file to edit it";
   const read=latestResult("files-read");
-  if(read?.result?.path===path.value)content.value=read.result.content||"";
+  let draft=null;
+  try{draft=JSON.parse(sessionStorage.getItem(FILE_DRAFT)||"null")}catch{}
+  if(draft && draft.path===path.value && typeof draft.content==="string")content.value=draft.content;
+  else if(read?.result?.path===path.value)content.value=read.result.content||"";
+  const persistFileDraft=()=>{
+    try{sessionStorage.setItem(FILE_DRAFT,JSON.stringify({path:path.value,content:content.value}))}catch{}
+  };
+  path.addEventListener("input",persistFileDraft);
+  content.addEventListener("input",persistFileDraft);
   const actions=proNode(editor,"div","dashboard-actions");
-  actions.append(proAction("Open file",()=>{window.mcEditPath=path.value;proCommand("files-read",{path:path.value})},"outline",!isBridgeLive()));
-  actions.append(proAction("Save file",()=>proCommand("files-write",{path:path.value,content:content.value},"Save this server file? It will persist after the next verified backup."),"primary",!isBridgeLive()));
+  actions.append(proAction("Open file",()=>{window.mcEditPath=path.value;sessionStorage.removeItem(FILE_DRAFT);proCommand("files-read",{path:path.value})},"outline",!isBridgeLive()));
+  actions.append(proAction("Save file",()=>{persistFileDraft();proCommand("files-write",{path:path.value,content:content.value},"Save this server file? It will persist after the next verified backup.")},"primary",!isBridgeLive()));
   actions.append(proAction("Delete file",()=>proCommand("files-delete",{path:path.value},"Permanently delete this configuration file from the running server?"),"danger",!isBridgeLive()));
   actions.append(proAction("Download text",()=>{
     const blob=new Blob([content.value],{type:"text/plain"});
@@ -274,6 +283,7 @@ filesPage=function(p){
     content.value=await file.text();
     path.value=file.name;
     window.mcEditPath=file.name;
+    persistFileDraft();
     proToast("Text loaded. Use Save file to upload it.");
   });
   proNotice(editor,"Only text files up to 256 KiB can be edited here. Server data is preserved in the next clean backup. Use Server Settings for server.properties.");
