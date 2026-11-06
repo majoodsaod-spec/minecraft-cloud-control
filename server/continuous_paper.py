@@ -161,7 +161,7 @@ def run(jar: Path) -> None:
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
     bridge=LiveBridge(DATA,os.environ.get("GITHUB_RUN_ID",str(int(time.time()))),
-                      players,lock,log_lines,ready,send,bridge_restart,bridge_shutdown,observed)
+                      players,lock,log_lines,ready,send,bridge_restart,bridge_shutdown,observed,proc.pid)
     bridge.start()
     graceful = False
     try:
