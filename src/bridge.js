@@ -18,6 +18,7 @@ export class MinecraftBridge {
     if(url.pathname==="/desired"){
       if(!["on","off"].includes(body.desired))return Response.json({error:"Invalid desired state"},{status:400});
       await this.ctx.storage.put("desired",body.desired);
+      if(body.desired==="on") await this.ctx.storage.put("commands",[]);
       return Response.json({ok:true,desired:body.desired});
     }
     if(url.pathname==="/enqueue"){
