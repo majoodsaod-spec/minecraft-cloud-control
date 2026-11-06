@@ -6,6 +6,7 @@ const FILE_DRAFT="mccloud-file-draft";
 let consoleSession="";
 let consoleHistory=[];
 let lastConsoleWindow=[];
+const pendingConsoleCommands=new Map();
 try {
   const saved=JSON.parse(sessionStorage.getItem(CONSOLE_STORE)||"null");
   if(saved && Array.isArray(saved.lines)){
@@ -236,7 +237,9 @@ consolePage=function(p){
     try{
       const response=await cloudApi("live-command",{type:"console",args:{command:cmd}});
       const index=consoleHistory.lastIndexOf(receipt);
-      if(index>=0)consoleHistory[index]="[You] /"+cmd+"  · queued for server";
+      const queued="[You] /"+cmd+"  · queued for server";
+      if(index>=0)consoleHistory[index]=queued;
+      if(response.id)pendingConsoleCommands.set(response.id,queued);
       toast("Command queued");
     }catch(error){
       const index=consoleHistory.lastIndexOf(receipt);
@@ -477,6 +480,17 @@ function updateServerDisplay(){
   }
   accumulateConsole();
   if(tab==="console"){
+    for(const ack of cloudState.bridge?.history||[]){
+      const queued=pendingConsoleCommands.get(ack.id);
+      if(!queued)continue;
+      const index=consoleHistory.lastIndexOf(queued);
+      if(index>=0){
+        const result=typeof ack.result==="string"?" · "+ack.result:"";
+        consoleHistory[index]=queued.replace("queued for server",ack.ok?"sent to Paper":"failed")+result;
+      }
+      pendingConsoleCommands.delete(ack.id);
+      saveConsoleHistory();
+    }
     const consoleBox=document.querySelector(".pro-console");
     if(consoleBox){
       const nearEnd=consoleBox.scrollHeight-consoleBox.scrollTop-consoleBox.clientHeight<50;
