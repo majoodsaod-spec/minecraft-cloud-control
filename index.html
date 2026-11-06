@@ -29,7 +29,7 @@ const menu=[["overview","▦","Overview"],["settings","⚙","Server Settings"],[
 const sections=["All","General","Gameplay","World","Network","Paper"];
 const schema=[
 ["motd","Server MOTD","General","text","A Minecraft Server","Message shown in the multiplayer list"],
-["max-players","Maximum players","General","number",5,"Maximum simultaneous players",1,100],
+["max-players","Player slot limit","General","number",1000000,"High default cap; actual capacity depends on CPU/RAM/network",1,2147483647],
 ["difficulty","Difficulty","Gameplay","select","normal","World difficulty",["peaceful","easy","normal","hard"]],
 ["gamemode","Default gamemode","Gameplay","select","survival","Default game mode",["survival","creative","adventure","spectator"]],
 ["pvp","Enable PvP","Gameplay","bool",true,"Allow players to damage each other"],
@@ -56,6 +56,8 @@ const schema=[
 const defaults=Object.fromEntries(schema.map(x=>[x[0],x[4]]));
 const safeLoad=()=>{try{return JSON.parse(localStorage.getItem("mccloud-settings")||"{}")}catch{return {}}};
 let settings={...defaults,...safeLoad()}, tab="overview", category="All", search="", plugins=[], uploaded=[], pendingFiles=[];
+if(settings["max-players"]===5&&!localStorage.getItem("mccloud-player-limit-v2")){settings["max-players"]=1000000;localStorage.setItem("mccloud-settings",JSON.stringify(settings))}
+localStorage.setItem("mccloud-player-limit-v2","1");
 function escapeHtml(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function toast(message){const n=document.getElementById("toast");n.textContent=message;n.classList.remove("hidden");clearTimeout(window.toastTimer);window.toastTimer=setTimeout(()=>n.classList.add("hidden"),3500)}
 function persist(){localStorage.setItem("mccloud-settings",JSON.stringify(settings))}
@@ -64,11 +66,12 @@ function init(){document.getElementById("nav").innerHTML=menu.map(([id,icon,labe
 function render(){document.getElementById("pageTitle").textContent=menu.find(x=>x[0]===tab)[2];document.querySelectorAll(".nav").forEach(n=>n.classList.toggle("active",n.dataset.nav===tab));const p=document.getElementById("page");p.innerHTML="";({overview,settingsPage,pluginsPage,filesPage,worldsPage,playersPage,consolePage,aboutPage})[({overview:"overview",settings:"settingsPage",plugins:"pluginsPage",files:"filesPage",worlds:"worldsPage",players:"playersPage",console:"consolePage",about:"aboutPage"})[tab]](p)}
 function element(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n}
 function addNotice(parent,message){parent.append(element("div","notice",message))}
-function overview(p){const cards=element("div","grid");[["Server","Offline"],["Players","— / "+settings["max-players"]],["RAM","Not connected"],["Software","Paper · planned"]].forEach(([a,b])=>{const n=element("div","panel stat");n.innerHTML='<span>'+a+'</span><b>'+escapeHtml(b)+'</b><span>Backend integration required</span>';cards.append(n)});p.append(cards);
+function overview(p){const cards=element("div","grid");[["Server","Offline"],["Players","— / "+(settings["max-players"]>=1000000?"Unlimited":settings["max-players"])],["RAM","Not connected"],["Software","Paper · planned"]].forEach(([a,b])=>{const n=element("div","panel stat");n.innerHTML='<span>'+a+'</span><b>'+escapeHtml(b)+'</b><span>Backend integration required</span>';cards.append(n)});p.append(cards);
 const sec=element("div","panel section");sec.innerHTML='<h2>Server controls</h2><p class="muted small">These actions require a connected Minecraft-compatible server backend and secure command API.</p>';const controls=element("div","flex");["▶ Start","■ Stop","↻ Restart","☁ Backup"].forEach(x=>{const b=button(x,()=>{},x.includes("Start")?"primary":"outline");b.disabled=true;b.title="Backend not connected";controls.append(b)});sec.append(controls);p.append(sec);addNotice(p,"Preview mode: this website does not launch a Minecraft server, upload files, or run GitHub Actions. Your configuration edits are saved only in this browser.");const links=element("div","panel");links.innerHTML='<h2>Quick access</h2><p class="muted">Find every configuration with search, toggle booleans, stage plugin JARs, and export a draft server.properties file.</p>';const b=button("Open server settings →",()=>{tab="settings";render()},"primary");links.append(b);p.append(links)}
 function settingsPage(p){const info=element("p","muted small","Edit settings using switches, inputs and dropdowns. Changes are local drafts until the server backend is connected. Paper options are placeholders until version-specific schema support is added.");p.append(info);
 const bar=element("div","toolbar");const s=element("input","search");s.placeholder="Search all settings (e.g. piston, PvP, distance)...";s.value=search;s.setAttribute("aria-label","Search settings");s.oninput=()=>{search=s.value;drawRows()};bar.append(s);bar.append(button("Export server.properties",exportProperties,"primary"));p.append(bar);
 const cat=element("div","tabs");sections.forEach(x=>{const b=element("button","tab"+(x===category?" active":""),x);b.onclick=()=>{category=x;render()};cat.append(b)});p.append(cat);
+const slotHelp=element("div","notice","Player slots: 1,000,000 is treated as effectively unlimited in the dashboard. This is a high numeric cap, not a promise of unlimited server performance.");p.append(slotHelp);
 const list=element("div","panel");list.id="settingsList";p.append(list);drawRows();
 const actions=element("div","flex section");actions.append(button("Reset to defaults",()=>{if(confirm("Reset all local draft settings to defaults?")){settings={...defaults};persist();render();toast("Draft settings reset")}},"outline"));actions.append(button("Download JSON draft",()=>download("minecraft-settings-draft.json",JSON.stringify(settings,null,2),"application/json"),"outline"));p.append(actions)}
 function drawRows(){const root=document.getElementById("settingsList");if(!root)return;root.innerHTML="";const values=schema.filter(x=>(category==="All"||x[2]===category)&&[x[0],x[1],x[5]].join(" ").toLowerCase().includes(search.toLowerCase()));if(!values.length){root.append(element("div","empty","No matching settings"));return}
