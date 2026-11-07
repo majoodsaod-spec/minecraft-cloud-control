@@ -14,14 +14,15 @@
         "height": 840,
         "minWidth": 940,
         "minHeight": 620,
-        "backgroundColor": "#F4F5F7",
+        "backgroundColor": "#f7f8fa",
         "center": true,
         "decorations": true
       }
     ],
     "security": {
       "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; script-src 'self'"
-    }
+    },
+    "withGlobalTauri": true
   },
   "bundle": {
     "active": true,
