@@ -1,6 +1,7 @@
 name: Dashboard checks
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - "public/**"
