@@ -86,3 +86,10 @@ test("NetBird auto-connection is refreshed and does not pile up status probes",(
   assert.match(ui,/pendingDirectStatus/);
   assert.match(ui,/if\(pendingDirectStatus\)return pendingDirectStatus/);
 });
+
+test("Direct Paper freshness uses local request time, not unsynchronized server clocks",()=>{
+  assert.match(ui,/directFetchedAt:0/);
+  assert.match(ui,/state\.directFetchedAt=Date\.now\(\)/);
+  assert.match(ui,/Date\.now\(\)-state\.directFetchedAt<15000/);
+  assert.doesNotMatch(ui,/Date\.now\(\)-\(d\.updatedAt\|\|0\)<15000/);
+});
