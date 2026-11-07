@@ -322,7 +322,7 @@ async function action(type,id){
   }
   case "connect-direct":{
     const token=$("#directToken")?.value.trim()||"",peerIp=$("#directPeer")?.value.trim()||"";
-    if(token.length<24)return flash("Enter the same strong secret saved as MINECRAFT_DIRECT_TOKEN in GitHub Actions.");
+    if(token.length<8)return flash("Enter a token of at least 8 characters matching MINECRAFT_DIRECT_TOKEN in GitHub Actions.");
     try{
       await run("direct_configure",{token,peerIp});
       clearDrafts("directToken","directPeer");
