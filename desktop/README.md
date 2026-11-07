@@ -90,3 +90,11 @@ The current app version **does not yet contain this button**, so **one manual in
 **What this is and isn't:** This is an *in-place, one-click installer upgrade*, not differential patching. GitHub Actions still builds the installer; the app downloads the complete installer automatically but does **not** require you to browse Artifacts, extract ZIPs, or install an unrelated second copy. Builds get a monotonically increasing `0.1.<GitHub workflow run number>` app version and a compiled-in GitHub Actions run ID so the updater can distinguish your installed build from a newer one. It only considers successful builds on the repository's `main` branch with the expected artifact name, verifies the expected single setup executable inside the archive, and never accepts arbitrary executable URLs from the UI.
 
 **Security:** GitHub artifact installers are not currently code-signed; Windows may show a SmartScreen prompt. Only update from your own repository and trusted successful workflow runs. The process leaves Minecraft workflows and world backups untouched. Expired/missing build artifacts cannot be installed by Quick Update.
+
+### Active GitHub run, but blank player statistics
+
+A GitHub Actions workflow marked `in_progress` means only that its workflow is active; **it does not confirm that Paper started**. When the Cloudflare live bridge is down or has not been configured in the desktop app, Paper player counts, memory, idle time and actual server uptime are unavailable. They must not be estimated from GitHub workflow state.
+
+The Overview now displays **GitHub workflow status, run number, and approximate elapsed time separately** from Paper metrics. Use **View Minecraft logs** for a direct GitHub read-only job-log snapshot when available.
+
+To enable actual live metrics, open **Connections** and enter the prefilled Minecraft Cloud Worker URL and your **Cloudflare dashboard admin password** (the GitHub personal access token is not this password), then select **Save and test live connection**. A Cloudflare Durable Object quota outage or a broken bridge still needs repairing separately; no Windows UI change can invent the missing telemetry. You do **not** need to change the Minecraft server's Playit address.
