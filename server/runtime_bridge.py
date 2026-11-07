@@ -292,8 +292,26 @@ class LiveBridge:
                     reason = "403 Forbidden: check Cloudflare Access or firewall rules blocking /api/bridge"
                 elif status == 404:
                     reason = "404 Not Found: CLOUDFLARE_CONTROL_URL must be the deployed Worker URL (without /api/bridge)"
+                elif status == 400:
+                    # Do not print arbitrary response bodies; Workers can
+                    # include implementation details in error responses.
+                    # These are the only recognized, non-sensitive messages.
+                    diagnostic = ""
+                    try:
+                        body = json.loads(exc.read(2048).decode("utf-8"))
+                        diagnostic = body.get("error", "") if isinstance(body, dict) else ""
+                    except (ValueError, UnicodeDecodeError, OSError):
+                        pass
+                    if diagnostic == "Missing runner session":
+                        reason = "400 Invalid session: check GitHub Actions GITHUB_RUN_ID"
+                    elif diagnostic == "Invalid heartbeat JSON":
+                        reason = "400 Malformed heartbeat JSON sent by runner"
+                    else:
+                        reason = "400 Worker rejected heartbeat: inspect Cloudflare Worker logs and deploy current Worker code"
                 elif status == 503:
                     reason = "503 Unavailable: Cloudflare Worker has no BRIDGE_TOKEN secret configured"
+                elif status == 502:
+                    reason = "502 Worker bridge storage error: inspect Cloudflare Worker logs and MC_BRIDGE binding"
                 elif status >= 500:
                     reason = f"{status} Worker error: verify Cloudflare deployment and Durable Object binding"
                 else:
