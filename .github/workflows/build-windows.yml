@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - "desktop/**"
+      - "tests/test_desktop_updater.mjs"
       - ".github/workflows/build-windows.yml"
 
 permissions:
