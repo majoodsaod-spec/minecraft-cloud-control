@@ -1,6 +1,8 @@
 """A console command must not bypass the verified Paper save/backup path."""
 import unittest
-from server.runtime_bridge import unsafe_shutdown_command
+from server.runtime_bridge import LiveBridge, unsafe_shutdown_command
+from contextlib import redirect_stdout
+import io
 
 
 class SafeConsoleTests(unittest.TestCase):
@@ -21,6 +23,18 @@ class SafeConsoleTests(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertFalse(unsafe_shutdown_command(command))
+
+
+
+class OptionalBridgeStartupTests(unittest.TestCase):
+    def test_non_https_cloudflare_url_does_not_abort_paper(self):
+        bridge = LiveBridge.__new__(LiveBridge)
+        bridge.url = "http://unsupported.example"
+        bridge.token = "redacted"
+        bridge.thread = None
+        with redirect_stdout(io.StringIO()):
+            self.assertIsNone(bridge.start())
+        self.assertIsNone(bridge.thread)
 
 
 if __name__ == "__main__":
