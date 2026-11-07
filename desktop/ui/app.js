@@ -8,7 +8,7 @@ const bytes=n=>!Number.isFinite(+n)?"—":(+n/1048576).toFixed(1)+" MB";
 const duration=s=>{s=Math.max(0,Math.floor(Number(s)||0));return [Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(x=>String(x).padStart(2,"0")).join(":");};
 const activeRun=r=>["in_progress","queued","waiting","requested","pending"].includes(r?.status);
 const isServer=r=>(r?.name||"").includes("Continuous Paper Minecraft Server")||(r?.path||"").includes("paper-state-test.yml");
-const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false};
+const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false};
 function flash(text){const box=$("#toast");box.textContent=text;box.classList.add("show");clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>box.classList.remove("show"),4300)}
 function btn(label,action="refresh",cls=""){return `<button class="btn ${cls}" data-action="${action}">${label}</button>`}
 function boxEmpty(title,body,icon="◇"){return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${body}</p></div>`}
@@ -82,9 +82,26 @@ async function quickUpdate(){
     state.updateChecking=false;syncUpdateButton();
   }
 }
+function directOnline(){
+  const d=state.direct;
+  return Boolean(d?.session&&d.ready&&Date.now()-(d.updatedAt||0)<15000);
+}
+function currentPaper(){
+  return directOnline()?state.direct:state.cloud?.bridge?.status||{};
+}
 function connectedLive(){
-  const live=state.cloud?.bridge?.status;
+  const live=currentPaper();
   return Boolean(live?.session&&live.ready&&Date.now()-(live.updatedAt||0)<45000);
+}
+async function loadDirect(quiet=true){
+  try{state.direct=await run("direct_status",{}, {quiet});state.directError=null;}
+  catch(err){state.direct=null;state.directError=errorText(err);}
+}
+async function sendPaper(kind,args={}){
+  if(directOnline())return run("direct_command",{kind,args});
+  if(!connectedLive())throw Error("Neither NetBird direct control nor Cloudflare bridge is online.");
+  if(kind==="console")return run("cloudflare_console",{command:args.command});
+  return run("cloudflare_command",{kind});
 }
 function latestServerRun(){return (state.overview?.runs||[]).find(r=>isServer(r))||null}
 function runRow(r,withCancel=false){
@@ -95,14 +112,14 @@ function runRow(r,withCancel=false){
   return `<div class="run"><div class="run-icon ${cls}">${cls==="failed"?"!":activeRun(r)?"↻":"✓"}</div><div class="run-content"><strong>${esc(r.display_title||r.name||"GitHub workflow")}</strong><span>${esc(r.name||"")} · ${esc(ago(r.created_at))} · #${esc(r.run_number||r.id)}</span></div><span class="run-status ${cls}">${esc(label)}</span><span class="row-buttons">${buttons}</span></div>`;
 }
 function drawOverview(){
-  const main=latestServerRun(),live=state.cloud?.bridge?.status||{},online=connectedLive();
+  const main=latestServerRun(),live=currentPaper(),online=connectedLive();
   const github=state.github.connected;
   const runnerStarted=main&&(main.run_started_at||main.created_at);
   const runnerElapsed=activeRun(main)&&runnerStarted
     ?Math.max(0,Math.floor((Date.now()-new Date(runnerStarted).getTime())/1000)):null;
   const status=online?"Paper online":activeRun(main)?"Runner active · Paper unverified":main?.conclusion==="failure"?"Latest server run failed":main?.conclusion==="success"?"Last session finished":github?"No active Minecraft runner":"GitHub not connected";
   const statePill=online?pill("● LIVE SERVER",""):activeRun(main)?pill("◉ GITHUB RUN ACTIVE","warn"):main?.conclusion==="failure"?pill("● WORKFLOW FAILED","warn"):pill("○ NO LIVE PAPER DATA");
-  const desc=online?"Paper is responding to live status requests. Your world is ready.":activeRun(main)?"GitHub confirms a workflow is active, but it does not verify that Paper is ready. Use GitHub logs to check startup.":main?.conclusion==="failure"?"GitHub reports the last Minecraft workflow failed. Open its job logs below to identify the problem.":github?"GitHub is connected; there is no confirmed live Paper heartbeat. Start a new run only if no Minecraft workflow is active.":"Connect GitHub to manage workflows. GitHub access does not provide a live Paper connection.";
+  const desc=online?(directOnline()?"Paper connected directly over NetBird, independently of Cloudflare.":"Paper is responding through Cloudflare."):activeRun(main)?"GitHub confirms a workflow is active, but it does not verify that Paper is ready. Use GitHub logs to check startup.":main?.conclusion==="failure"?"GitHub reports the last Minecraft workflow failed. Open its job logs below to identify the problem.":github?"GitHub is connected; there is no confirmed live Paper heartbeat. Start a new run only if no Minecraft workflow is active.":"Connect GitHub to manage workflows. GitHub access does not provide a live Paper connection.";
   const hero=`<div class="hero"><div class="hero-top"><div><div class="hero-label">YOUR MINECRAFT WORLD</div><div class="hero-title">${esc(status)}</div></div>${statePill}</div><div class="hero-desc">${desc}</div><div class="hero-actions">${btn("▶ Start server","start-server","primary")} ${btn("↻ Safe restart","restart-server")} ${btn("■ Save & stop","stop-server","danger")} ${main?btn("◷ View Minecraft logs","server-logs","flat"):""}</div></div>`;
   const stats=`<div class="stats">
    ${stat("Online players",online?(live.players||[]).length:"—",online?"Connected to Paper":"Live connection required","♙")}
@@ -115,7 +132,7 @@ function drawOverview(){
   const recent=runs.slice(0,5);
   const actions=`<div class="columns">
    ${panel("Recent activity",recent.length?`<div class="run-list">${recent.map(r=>runRow(r)).join("")}</div>`:boxEmpty("No runs loaded","Connect your GitHub account to see recent activity.","⎇"),`<button class="btn small flat" data-page="workflows">View all →</button>`)}
-   ${panel("Connection health",`<div class="list-stat"><span>GitHub</span><strong>${github?"● Connected":"○ Not connected"}</strong></div><div class="list-stat"><span>Minecraft live bridge</span><strong>${online?"● Connected":"○ Offline / unavailable"}</strong></div><div class="list-stat"><span>Minecraft workflow</span><strong>${main?esc(main.conclusion||main.status||"unknown"):"—"}</strong></div><div class="list-stat"><span>Latest run</span><strong>${main?esc("#"+main.run_number):"—"}</strong></div><div class="list-stat"><span>World backups</span><strong>${(state.overview?.artifacts||[]).filter(a=>!a.expired).length}</strong></div><p class="field-tip" style="margin-top:18px">GitHub workflow management works without Cloudflare. Safe live commands need a working server bridge.</p>`)}
+   ${panel("Connection health",`<div class="list-stat"><span>GitHub</span><strong>${github?"● Connected":"○ Not connected"}</strong></div><div class="list-stat"><span>Direct Paper · NetBird</span><strong>${directOnline()?"● Connected":"○ Offline / not configured"}</strong></div><div class="list-stat"><span>Cloudflare bridge</span><strong>${state.cloud?.bridge?.status?.ready?"● Connected":"○ Offline / unavailable"}</strong></div><div class="list-stat"><span>Minecraft workflow</span><strong>${main?esc(main.conclusion||main.status||"unknown"):"—"}</strong></div><div class="list-stat"><span>Latest run</span><strong>${main?esc("#"+main.run_number):"—"}</strong></div><div class="list-stat"><span>World backups</span><strong>${(state.overview?.artifacts||[]).filter(a=>!a.expired).length}</strong></div><p class="field-tip" style="margin-top:18px">GitHub workflow management works without Cloudflare. Safe live commands need a working server bridge.</p>`)}
    </div>`;
   $("#content").innerHTML=header("WELCOME BACK","Your server, beautifully managed.","Everything important about your Minecraft world, in one calm place.",btn("↻ Refresh","refresh","flat"))+hero+stats+runnerCard+actions;
 }
@@ -132,7 +149,7 @@ function drawWorkflows(){
   +panel("Recent runs",runs.length?`<div class="run-list">${runs.slice(0,20).map(r=>runRow(r,true)).join("")}</div>`:boxEmpty("No workflow runs","Workflow activity will appear here once connected.","◷"),pill(runs.length+" loaded runs"));
 }
 function drawConsole(){
-  const online=connectedLive(),logs=state.cloud?.bridge?.status?.logs||[];
+  const online=connectedLive(),logs=currentPaper().logs||[];
   const githubLogs=state.githubLog||"";
   const githubFallback=!online&&state.github.connected;
   const lines=online&&logs.length?logs.map(line=>{
@@ -140,7 +157,7 @@ function drawConsole(){
     return `<div class="${cls}">${esc(line)}</div>`;
   }).join(""):githubFallback&&githubLogs?`<span class="dim">GitHub Actions logs (may be delayed; read-only)</span>\n${esc(githubLogs)}`:`<span class="dim">${esc(state.githubLogError||"No Paper live console. GitHub job logs are available below when GitHub publishes them.")}</span>`;
   $("#content").innerHTML=header("LIVE MANAGEMENT","Console","Your Paper server's latest output, securely relayed when the live bridge is available.",btn("↻ Refresh","refresh","flat"))
-   +(online?notice("● Secure bridge online — console commands are sent to the active Paper process.",true):notice(githubFallback?"GitHub read-only log fallback is active. These logs may be delayed or unavailable during an active job. GitHub does not support sending Paper console commands.":"The live bridge is offline. Connect GitHub to inspect workflow logs. Do not force-cancel a running Minecraft job."))
+   +(online?notice(directOnline()?"● Direct NetBird connection online. Console works without Cloudflare.":"● Cloudflare bridge online — console commands are sent to Paper.",true):notice(githubFallback?"GitHub read-only log fallback is active. These logs may be delayed or unavailable during an active job. GitHub does not support sending Paper console commands.":"The live bridge is offline. Connect GitHub to inspect workflow logs. Do not force-cancel a running Minecraft job."))
    +panel(online?"Paper live console":"GitHub Actions · read-only job logs",`<div class="header-actions" style="justify-content:flex-start;margin-bottom:12px"><button class="btn small flat" data-action="server-logs" ${githubFallback?"":"disabled"}>↻ Load GitHub logs</button><span class="field-tip">${esc(state.githubLogInfo||"GitHub job output is not a direct Paper connection")}</span></div><div class="console" id="terminal">${lines}</div><form id="consoleForm" class="console-form"><input id="commandText" placeholder="Enter a Paper console command…" autocomplete="off" aria-label="Paper console command" ${online?"":"disabled"}><button class="btn primary" ${online?"":"disabled"}>Send ↗</button></form>`);
   const term=$("#terminal");term.scrollTop=term.scrollHeight;
 }
@@ -235,7 +252,7 @@ async function loadGithubServerLog(quiet=true){
 async function refresh(quiet=false){
   if(state.busy)return;state.busy=true;$("#refresh").disabled=true;
   try{
-    await Promise.all([loadOverview(quiet),loadCloud(true)]);
+    await Promise.all([loadOverview(quiet),loadCloud(true),loadDirect(true)]);
     if(state.page==="workflows"&&state.github.connected){
       try{state.workflows=await run("github_workflows",{}, {quiet:true});}catch{}
     }
@@ -266,6 +283,19 @@ async function action(type,id){
     if(!await dialog("Disconnect GitHub?","Removes the saved GitHub token from Windows Credential Manager."))return;
     await run("disconnect_github");state.github={connected:false};state.overview=null;state.workflows=null;state.update=null;flash("GitHub disconnected.");return render();
   }
+  case "connect-direct":{
+    const token=$("#directToken")?.value.trim()||"",peerIp=$("#directPeer")?.value.trim()||"";
+    if(token.length<24)return flash("Enter the same strong secret saved as MINECRAFT_DIRECT_TOKEN in GitHub Actions.");
+    try{
+      await run("direct_configure",{token,peerIp});
+      await loadDirect(false);
+      flash(directOnline()?"Direct Paper connected! No Cloudflare required.":"Credentials saved. Start a new runner with NetBird enabled, then test again.");
+      render();
+    }catch{}return;
+  }
+  case "test-direct":{
+    await loadDirect(false);flash(directOnline()?"NetBird connection healthy.":"Direct Paper unavailable: "+(state.directError||"Check NetBird status."));render();return;
+  }
   case "connect-cloud":{
     const url=$("#cloudUrl")?.value||"",password=$("#cloudPass")?.value||"";
     if(!url||!password)return flash("Enter a Worker URL and password.");
@@ -280,7 +310,7 @@ async function action(type,id){
     if(!connectedLive())return flash("Safe restart requires a working live bridge. Do not cancel the workflow or risk losing world progress.");
     const kind=type==="restart-server"?"restart":"shutdown";
     if(!await dialog(kind==="restart"?"Safely restart Minecraft?":"Safely save and stop?","This asks the live server agent to disconnect players, save all world data and upload a verified backup before the session ends."))return;
-    try{await run("cloudflare_command",{kind});flash("Safe operation requested. Check workflow for backup completion.");}catch{}return;
+    try{await sendPaper(kind);flash("Safe operation requested. Check workflow for backup completion.");}catch{}return;
   }
   case "dispatch":{
     if(!state.github.connected)return flash("Connect GitHub first.");
@@ -341,9 +371,17 @@ document.addEventListener("click",ev=>{
 document.addEventListener("submit",async ev=>{
   if(ev.target.id!=="consoleForm")return;
   ev.preventDefault();const cmd=$("#commandText").value.trim();if(!cmd)return;
-  try{await run("cloudflare_console",{command:cmd});$("#commandText").value="";flash("Command queued for Paper.");setTimeout(()=>refresh(true),1000);}catch{}
+  try{await sendPaper("console",{command:cmd});$("#commandText").value="";flash("Command sent to Paper.");setTimeout(()=>refresh(true),1000);}catch{}
 });
 $("#refresh").addEventListener("click",()=>refresh());
 setInterval(()=>{$("#time").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});},1000);
+setInterval(async()=>{
+  if(document.visibilityState!=="visible")return;
+  await loadDirect(true);
+  if(["overview","console","connections"].includes(state.page)){
+    if(state.page==="console"&&document.activeElement?.id==="commandText")return;
+    render();
+  }
+},4000);
 setInterval(()=>{if(document.visibilityState==="visible")refresh(true)},12000);
 startApp();
