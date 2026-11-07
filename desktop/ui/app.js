@@ -8,7 +8,7 @@ const bytes=n=>!Number.isFinite(+n)?"—":(+n/1048576).toFixed(1)+" MB";
 const duration=s=>{s=Math.max(0,Math.floor(Number(s)||0));return [Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(x=>String(x).padStart(2,"0")).join(":");};
 const activeRun=r=>["in_progress","queued","waiting","requested","pending"].includes(r?.status);
 const isServer=r=>(r?.name||"").includes("Continuous Paper Minecraft Server")||(r?.path||"").includes("paper-state-test.yml");
-const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null};
+const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0};
 function flash(text){const box=$("#toast");box.textContent=text;box.classList.add("show");clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>box.classList.remove("show"),4300)}
 function btn(label,action="refresh",cls=""){return `<button class="btn ${cls}" data-action="${action}">${label}</button>`}
 function boxEmpty(title,body,icon="◇"){return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${body}</p></div>`}
@@ -42,10 +42,10 @@ function runRow(r,withCancel=false){
 function drawOverview(){
   const main=latestServerRun(),live=state.cloud?.bridge?.status||{},online=connectedLive();
   const github=state.github.connected;
-  const status=online?"Online":activeRun(main)?"GitHub runner active":main?.conclusion==="success"?"Last session completed":"Not connected";
-  const statePill=online?pill("● LIVE SERVER",""):activeRun(main)?pill("◉ RUNNER ACTIVE","warn"):pill("○ NO LIVE DATA");
-  const desc=online?"Paper is responding to live status requests. Your world is ready.":activeRun(main)?"The GitHub Actions job is running. Live controls are independent and require the secure Cloudflare bridge.":"Connect GitHub to manage the server and see its most recent workflow.";
-  const hero=`<div class="hero"><div class="hero-top"><div><div class="hero-label">YOUR MINECRAFT WORLD</div><div class="hero-title">${esc(status)}</div></div>${statePill}</div><div class="hero-desc">${desc}</div><div class="hero-actions">${btn("▶ Start server","start-server","primary")} ${btn("↻ Safe restart","restart-server")} ${btn("■ Save & stop","stop-server","danger")}</div></div>`;
+  const status=online?"Paper online":activeRun(main)?"Runner active · Paper unverified":main?.conclusion==="failure"?"Latest server run failed":main?.conclusion==="success"?"Last session finished":github?"No active Minecraft runner":"GitHub not connected";
+  const statePill=online?pill("● LIVE SERVER",""):activeRun(main)?pill("◉ GITHUB RUN ACTIVE","warn"):main?.conclusion==="failure"?pill("● WORKFLOW FAILED","warn"):pill("○ NO LIVE PAPER DATA");
+  const desc=online?"Paper is responding to live status requests. Your world is ready.":activeRun(main)?"GitHub confirms a workflow is active, but it does not verify that Paper is ready. Use GitHub logs to check startup.":main?.conclusion==="failure"?"GitHub reports the last Minecraft workflow failed. Open its job logs below to identify the problem.":github?"GitHub is connected; there is no confirmed live Paper heartbeat. Start a new run only if no Minecraft workflow is active.":"Connect GitHub to manage workflows. GitHub access does not provide a live Paper connection.";
+  const hero=`<div class="hero"><div class="hero-top"><div><div class="hero-label">YOUR MINECRAFT WORLD</div><div class="hero-title">${esc(status)}</div></div>${statePill}</div><div class="hero-desc">${desc}</div><div class="hero-actions">${btn("▶ Start server","start-server","primary")} ${btn("↻ Safe restart","restart-server")} ${btn("■ Save & stop","stop-server","danger")} ${main?btn("◷ View Minecraft logs","server-logs","flat"):""}</div></div>`;
   const stats=`<div class="stats">
    ${stat("Online players",online?(live.players||[]).length:"—",online?"Connected to Paper":"Live connection required","♙")}
    ${stat("Server uptime",online?duration(live.uptime||0):"—","Current runner session","◷")}
@@ -56,7 +56,7 @@ function drawOverview(){
   const recent=runs.slice(0,5);
   const actions=`<div class="columns">
    ${panel("Recent activity",recent.length?`<div class="run-list">${recent.map(r=>runRow(r)).join("")}</div>`:boxEmpty("No runs loaded","Connect your GitHub account to see recent activity.","⎇"),`<button class="btn small flat" data-page="workflows">View all →</button>`)}
-   ${panel("Connection health",`<div class="list-stat"><span>GitHub</span><strong>${github?"● Connected":"○ Not connected"}</strong></div><div class="list-stat"><span>Minecraft live bridge</span><strong>${online?"● Connected":"○ Offline / unavailable"}</strong></div><div class="list-stat"><span>Latest run</span><strong>${main?esc("#"+main.run_number):"—"}</strong></div><div class="list-stat"><span>World backups</span><strong>${(state.overview?.artifacts||[]).filter(a=>!a.expired).length}</strong></div><p class="field-tip" style="margin-top:18px">GitHub workflow management works without Cloudflare. Safe live commands need a working server bridge.</p>`)}
+   ${panel("Connection health",`<div class="list-stat"><span>GitHub</span><strong>${github?"● Connected":"○ Not connected"}</strong></div><div class="list-stat"><span>Minecraft live bridge</span><strong>${online?"● Connected":"○ Offline / unavailable"}</strong></div><div class="list-stat"><span>Minecraft workflow</span><strong>${main?esc(main.conclusion||main.status||"unknown"):"—"}</strong></div><div class="list-stat"><span>Latest run</span><strong>${main?esc("#"+main.run_number):"—"}</strong></div><div class="list-stat"><span>World backups</span><strong>${(state.overview?.artifacts||[]).filter(a=>!a.expired).length}</strong></div><p class="field-tip" style="margin-top:18px">GitHub workflow management works without Cloudflare. Safe live commands need a working server bridge.</p>`)}
    </div>`;
   $("#content").innerHTML=header("WELCOME BACK","Your server, beautifully managed.","Everything important about your Minecraft world, in one calm place.",btn("↻ Refresh","refresh","flat"))+hero+stats+actions;
 }
@@ -74,13 +74,15 @@ function drawWorkflows(){
 }
 function drawConsole(){
   const online=connectedLive(),logs=state.cloud?.bridge?.status?.logs||[];
-  const lines=logs.length?logs.map(line=>{
+  const githubLogs=state.githubLog||"";
+  const githubFallback=!online&&state.github.connected;
+  const lines=online&&logs.length?logs.map(line=>{
     const cls=/\b(ERROR|Exception|failed)\b/i.test(line)?"error":/\b(INFO|Done|joined)\b/i.test(line)?"info":"";
     return `<div class="${cls}">${esc(line)}</div>`;
-  }).join(""):`<span class="dim">No live console available. Configure the optional Cloudflare bridge to enable console access. GitHub Actions run details remain available independently.</span>`;
+  }).join(""):githubFallback&&githubLogs?`<span class="dim">GitHub Actions logs (may be delayed; read-only)</span>\\n${esc(githubLogs)}`:`<span class="dim">${esc(state.githubLogError||"No Paper live console. GitHub job logs are available below when GitHub publishes them.")}</span>`;
   $("#content").innerHTML=header("LIVE MANAGEMENT","Console","Your Paper server's latest output, securely relayed when the live bridge is available.",btn("↻ Refresh","refresh","flat"))
-   +(online?notice("● Secure bridge online — console commands are sent to the active Paper process.",true):notice("The live bridge is offline. Minecraft may still be running. Do not force-cancel its workflow to restart it."))
-   +panel("Paper console",`<div class="console" id="terminal">${lines}</div><form id="consoleForm" class="console-form"><input id="commandText" placeholder="Enter a Paper console command…" autocomplete="off" aria-label="Paper console command" ${online?"":"disabled"}><button class="btn primary" ${online?"":"disabled"}>Send ↗</button></form>`);
+   +(online?notice("● Secure bridge online — console commands are sent to the active Paper process.",true):notice(githubFallback?"GitHub read-only log fallback is active. These logs may be delayed or unavailable during an active job. GitHub does not support sending Paper console commands.":"The live bridge is offline. Connect GitHub to inspect workflow logs. Do not force-cancel a running Minecraft job."))
+   +panel(online?"Paper live console":"GitHub Actions · read-only job logs",`<div class="header-actions" style="justify-content:flex-start;margin-bottom:12px"><button class="btn small flat" data-action="server-logs" ${githubFallback?"":"disabled"}>↻ Load GitHub logs</button><span class="field-tip">${esc(state.githubLogInfo||"GitHub job output is not a direct Paper connection")}</span></div><div class="console" id="terminal">${lines}</div><form id="consoleForm" class="console-form"><input id="commandText" placeholder="Enter a Paper console command…" autocomplete="off" aria-label="Paper console command" ${online?"":"disabled"}><button class="btn primary" ${online?"":"disabled"}>Send ↗</button></form>`);
   const term=$("#terminal");term.scrollTop=term.scrollHeight;
 }
 function drawFiles(){
@@ -149,6 +151,25 @@ async function loadCloud(quiet=true){
   try{state.cloud=await run("cloudflare_status",{}, {quiet});state.cloudError=null;}
   catch(e){state.cloudError=errorText(e);state.cloud=null;}
 }
+async function loadGithubServerLog(quiet=true){
+  if(!state.github.connected||state.logBusy)return;
+  const target=latestServerRun();
+  if(!target){state.githubLogError="No Minecraft GitHub Actions run found.";return;}
+  state.logBusy=true;
+  try{
+    const jobs=await run("github_jobs",{runId:Number(target.id)},{quiet});
+    const list=Array.isArray(jobs)?jobs:[];
+    const job=list.find(j=>j.status==="in_progress")||list.find(j=>j.conclusion==="failure")||list.find(j=>j.conclusion==="success")||list[0];
+    if(!job){state.githubLogError="GitHub has not created a job for this run yet.";return;}
+    state.githubLogInfo="Run #"+target.run_number+" · "+(job.name||"job")+" · "+(job.conclusion||job.status);
+    const content=await run("github_job_log",{jobId:Number(job.id)},{quiet});
+    state.githubLog=typeof content==="string"?content:"";
+    state.githubLogError=null;
+    state.logFetchedAt=Date.now();
+  }catch(error){
+    state.githubLogError="GitHub job logs not available yet: "+errorText(error);
+  }finally{state.logBusy=false;}
+}
 async function refresh(quiet=false){
   if(state.busy)return;state.busy=true;$("#refresh").disabled=true;
   try{
@@ -156,6 +177,7 @@ async function refresh(quiet=false){
     if(state.page==="workflows"&&state.github.connected){
       try{state.workflows=await run("github_workflows",{}, {quiet:true});}catch{}
     }
+    if(state.page==="console"&&!connectedLive()&&state.github.connected&&Date.now()-state.logFetchedAt>30000)await loadGithubServerLog(true);
     state.lastFetch=Date.now();render();
   }finally{state.busy=false;$("#refresh").disabled=false}
 }
@@ -167,6 +189,11 @@ async function startApp(){
 async function action(type,id){
   switch(type){
   case "refresh":return refresh();
+  case "server-logs":{
+    if(!state.github.connected)return flash("Connect GitHub first.");
+    state.page="console";state.githubLog=null;state.githubLogError=null;
+    await loadGithubServerLog(false);render();return;
+  }
   case "connect-github":{
     const token=$("#token")?.value||"";if(!token)return flash("Enter a GitHub token first.");
     try{state.github=await run("connect_github",{token});$("#token").value="";flash("GitHub connected securely.");await refresh();state.page="overview";render();}catch{}return;
@@ -243,7 +270,7 @@ async function action(type,id){
 }
 document.addEventListener("click",ev=>{
   const nav=ev.target.closest("[data-page]");
-  if(nav){state.page=nav.dataset.page;render();if(state.page==="workflows"&&!state.workflows&&state.github.connected)refresh(true);return;}
+  if(nav){state.page=nav.dataset.page;render();if(state.page==="workflows"&&!state.workflows&&state.github.connected)refresh(true);if(state.page==="console"&&!connectedLive()&&state.github.connected)loadGithubServerLog(true).then(render);return;}
   const button=ev.target.closest("[data-action]");
   if(button){ev.preventDefault();action(button.dataset.action,button.dataset.id);}
 });
