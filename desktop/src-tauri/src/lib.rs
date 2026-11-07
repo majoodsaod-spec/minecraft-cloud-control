@@ -421,7 +421,11 @@ fn netbird_binary() -> Result<std::path::PathBuf, String> {
 }
 
 fn netbird_cli(exe: &std::path::Path, operation: &str) -> Result<String, String> {
-    let mut child=hide_netbird_console(std::process::Command::new(exe).arg(operation))
+    netbird_cli_args(exe,&[operation])
+}
+fn netbird_cli_args(exe: &std::path::Path, args: &[&str]) -> Result<String, String> {
+    let operation=args.join(" ");
+    let mut child=hide_netbird_console(std::process::Command::new(exe).args(args))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -451,6 +455,15 @@ mod netbird_lifecycle_tests {
         assert!(!netbird_is_connected("Management: Disconnected\nSignal: Connected\n"));
         assert!(!netbird_is_connected("Management: Connected\nSignal: Disconnected\n"));
         assert!(!netbird_is_connected("Peers count: 1/2 Connected\n"));
+    }
+    #[test]
+    fn discovers_runner_from_netbird_table_and_details() {
+        assert_eq!(runner_peer_id("minecraft-paper-42389453154.netbird.cloud"),Some(42389453154));
+        assert_eq!(runner_peer_id("minecraft-paper-42389453154"),Some(42389453154));
+        assert_eq!(parse_peer_table("NAME IP STATUS CONN\\nminecraft-paper-42389453154.netbird.cloud 100.94.2.7 Connected Relayed\\n"),
+            Some("100.94.2.7".to_owned()));
+        assert_eq!(parse_peer_details("Peers detail:\\n minecraft-paper-42389453154.netbird.cloud:\\n  NetBird IP: 100.94.2.7\\n  Status: Connected\\n"),
+            Some("100.94.2.7".to_owned()));
     }
     #[test]
     fn manual_overlay_address_cannot_point_to_public_internet() {
@@ -539,45 +552,68 @@ fn private_overlay_ip(value: &str) -> bool {
     parts[0]==100 && (64..=127).contains(&parts[1])
 }
 
-fn find_netbird_peer() -> Result<String, String> {
-    let mut binaries=vec![std::path::PathBuf::from("netbird")];
-    for name in [
-        r"C:\Program Files\NetBird\netbird.exe",
-        r"C:\Program Files\NetBird\bin\netbird.exe",
-        r"C:\Program Files (x86)\NetBird\netbird.exe"
-    ] {
-        binaries.push(name.into());
+// NetBird may show the short hostname or its full .netbird.cloud FQDN.
+// Always match the numeric GitHub run ID from the first hostname label.
+fn runner_peer_id(name: &str) -> Option<u64> {
+    name.split('.').next()?
+        .to_ascii_lowercase()
+        .strip_prefix("minecraft-paper-")?
+        .parse::<u64>().ok().filter(|run| *run>0)
+}
+fn parse_peer_table(report: &str) -> Option<String> {
+    let mut peers=Vec::new();
+    for line in report.lines() {
+        let cols=line.split_whitespace().collect::<Vec<_>>();
+        if cols.len()<3 {continue;}
+        let Some(id)=runner_peer_id(cols[0]) else {continue;};
+        if !private_overlay_ip(cols[1]) || !cols[2].eq_ignore_ascii_case("connected") {continue;}
+        peers.push((id,cols[1].to_owned()));
     }
-    let mut output=None;
-    for binary in binaries {
-        if let Ok(result)=hide_netbird_console(std::process::Command::new(&binary)
-            .args(["status","--table"]))
-            .output() {
-            if result.status.success() {
-                output=Some(String::from_utf8_lossy(&result.stdout).into_owned());
-                break;
+    peers.sort_unstable_by_key(|x|x.0);
+    peers.pop().map(|x|x.1)
+}
+fn parse_peer_details(report: &str) -> Option<String> {
+    let mut peers=Vec::new();
+    let mut id=None;
+    let mut ip=None;
+    let mut connected=false;
+    let mut finish=|id: Option<u64>,ip: Option<String>,connected: bool| {
+        if let (Some(id),Some(ip))=(id,ip){
+            if connected && private_overlay_ip(&ip){peers.push((id,ip));}
+        }
+    };
+    for line in report.lines() {
+        let trimmed=line.trim();
+        // Peer blocks begin with a hostname followed by ':'.
+        if let Some(name)=trimmed.strip_suffix(':') {
+            if let Some(new_id)=runner_peer_id(name) {
+                finish(id,ip.take(),connected);
+                id=Some(new_id);ip=None;connected=false;
+                continue;
             }
         }
+        if id.is_none(){continue;}
+        if let Some(value)=trimmed.strip_prefix("NetBird IP:"){
+            ip=Some(value.trim().split('/').next().unwrap_or("").to_owned());
+        }
+        if let Some(value)=trimmed.strip_prefix("Status:"){
+            connected=value.trim().eq_ignore_ascii_case("Connected");
+        }
     }
-    let report=output.ok_or("NetBird CLI unavailable. Ensure NetBird is installed and connected.")?;
-    let mut candidates=Vec::new();
-    for line in report.lines() {
-        let columns=line.split_whitespace().collect::<Vec<_>>();
-        if columns.len()<3 {continue;}
-        let peer=columns[0].to_ascii_lowercase();
-        if !peer.starts_with("minecraft-paper-") {continue;}
-        let ip=columns[1];
-        if !private_overlay_ip(ip) {continue;}
-        if !columns[2].eq_ignore_ascii_case("connected") {continue;}
-        let id=peer.trim_start_matches("minecraft-paper-")
-            .parse::<u64>().unwrap_or(0);
-        if id==0 {continue;}
-        candidates.push((id,ip.to_owned()));
+    finish(id,ip,connected);
+    peers.sort_unstable_by_key(|x|x.0);
+    peers.pop().map(|x|x.1)
+}
+fn find_netbird_peer() -> Result<String, String> {
+    let binary=netbird_binary()?;
+    // Table format on recent NetBird; --detail works on older versions.
+    if let Ok(table)=netbird_cli_args(&binary,&["status","--table"]){
+        if let Some(ip)=parse_peer_table(&table){return Ok(ip);}
     }
-    candidates.sort_unstable_by_key(|x|x.0);
-    candidates.pop().map(|x|x.1).ok_or(
-        "No connected minecraft-paper runner found in NetBird. Check that the new GitHub Actions session joined the same NetBird network.".to_owned()
-    )
+    if let Ok(detail)=netbird_cli_args(&binary,&["status","--detail"]){
+        if let Some(ip)=parse_peer_details(&detail){return Ok(ip);}
+    }
+    Err("No connected minecraft-paper runner is visible in NetBird. Check the Windows NetBird app's Peers list and that the GitHub runner belongs to an access group your PC can reach.".into())
 }
 
 fn direct_peer_ip() -> Result<String, String> {
