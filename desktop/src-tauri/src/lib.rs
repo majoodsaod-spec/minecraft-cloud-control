@@ -643,12 +643,21 @@ async fn direct_request(kind: &str, command: Option<Value>) -> Result<Value, Str
         Some(body)=>client.post(url).json(&body),
         None=>client.get(url)
     };
-    let response=req.bearer_auth(token).send().await.map_err(|_|{
-        "Can't reach Paper over NetBird. Check that both peers are connected and the runner has MINECRAFT_DIRECT_TOKEN.".to_owned()
+    let response=req.bearer_auth(token).send().await.map_err(|e|{
+        if e.is_timeout() {
+            return format!("NetBird peer {ip} found, but Paper control port 8765 timed out. Check NetBird access policies for TCP/8765 and the runner log for 'Direct NetBird Paper control listening'.");
+        }
+        if e.is_connect(){
+            return format!("NetBird peer {ip} found, but Paper control port 8765 is unreachable. Check the runner log for 'Direct NetBird Paper control listening' and allow TCP/8765 from this PC in NetBird.");
+        }
+        "NetBird peer found, but the private Paper request failed. Verify Windows NetBird is connected.".to_owned()
     })?;
     let code=response.status();
     let body=response.json::<Value>().await.map_err(|_|"Invalid private Paper response".to_owned())?;
     if !code.is_success(){
+        if code.as_u16()==401 {
+            return Err("NetBird reached the Paper server, but the direct-control token was rejected (HTTP 401). Enter the exact MINECRAFT_DIRECT_TOKEN value used by the currently running GitHub job.".into());
+        }
         return Err(format!("Direct Paper HTTP {}: {}",code.as_u16(),
             body["error"].as_str().unwrap_or("Unknown server error").chars().take(160).collect::<String>()));
     }
