@@ -47,3 +47,22 @@ test("opt-in NetBird lifecycle never disconnects an existing user VPN session",(
   assert.match(rust,/netbird_auto_status,netbird_set_auto/);
   assert.match(ui,/id="netbirdAuto"/);
 });
+
+test("NetBird background CLI never flashes Windows terminal windows",()=>{
+  assert.match(rust,/fn hide_netbird_console/);
+  assert.match(rust,/creation_flags\(0x0800_0000\)/);
+  assert.match(rust,/hide_netbird_console\(std::process::Command::new\(&path\)\.arg\("version"\)\)/);
+  assert.match(rust,/hide_netbird_console\(std::process::Command::new\(exe\)\.arg\(operation\)\)/);
+  assert.match(rust,/hide_netbird_console\(\s*std::process::Command::new\(&binary\)/);
+  assert.match(rust,/starts_with\("connected"\)/);
+});
+test("background polling preserves unsaved user input and secret fields",()=>{
+  assert.match(ui,/draftFields=new Set/);
+  assert.match(ui,/restoreDrafts\(\)/);
+  assert.match(ui,/document\.addEventListener\("input"/);
+  assert.match(ui,/if\(!editing\(\)\)render\(\)/);
+  assert.match(ui,/includes\(state\.page\)\&\&!editing\(\)/);
+  for(const id of ["directToken","directPeer","cloudPass","filecontent","commandText"]){
+    assert.ok(ui.includes('"'+id+'"'),"Draft field not protected: "+id);
+  }
+});
