@@ -472,6 +472,20 @@ mod netbird_lifecycle_tests {
             Some("100.94.2.7".to_owned()));
     }
     #[test]
+    fn discovers_runner_from_netbird_json() {
+        let report=r#"{
+          "daemonStatus":"Connected",
+          "peers":{"total":2,"connected":1,"details":[
+            {"fqdn":"minecraft-paper-42389453153.netbird.cloud","netbirdIp":"100.94.2.4","status":"Connected"},
+            {"fqdn":"minecraft-paper-42389453154.netbird.cloud","netbirdIp":"100.94.2.7","status":"Idle"}
+          ]}
+        }"#;
+        assert_eq!(parse_peer_json(report),Some("100.94.2.7".into()));
+        assert_eq!(parse_peer_json("{}"),None);
+        assert_eq!(parse_peer_json(r#"{"peers":{"details":[{"fqdn":"minecraft-paper-2",
+            "netbirdIp":"8.8.8.8","status":"Connected"}]}}"#),None);
+    }
+    #[test]
     fn manual_overlay_address_cannot_point_to_public_internet() {
         assert!(private_overlay_ip("100.93.164.78"));
         assert!(!private_overlay_ip("127.0.0.1"));
@@ -566,6 +580,26 @@ fn runner_peer_id(name: &str) -> Option<u64> {
         .strip_prefix("minecraft-paper-")?
         .parse::<u64>().ok().filter(|run| *run>0)
 }
+// NetBird officially exposes stable JSON: peers.details[] contains fqdn,
+// netbirdIp and status. Prefer this over terminal text parsing.
+fn parse_peer_json(report: &str) -> Option<String> {
+    let body: Value=serde_json::from_str(report).ok()?;
+    let peers=body.get("peers")?.get("details")?.as_array()?;
+    let mut candidates=Vec::new();
+    for peer in peers {
+        let fqdn=peer.get("fqdn")?.as_str()?;
+        let Some(id)=runner_peer_id(fqdn) else {continue;};
+        let Some(ip)=peer.get("netbirdIp").and_then(Value::as_str) else {continue;};
+        let Some(status)=peer.get("status").and_then(Value::as_str) else {continue;};
+        if private_overlay_ip(ip) && matches!(
+            status.to_ascii_lowercase().as_str(),"connected"|"connecting"|"idle"
+        ) {
+            candidates.push((id,ip.to_owned()));
+        }
+    }
+    candidates.sort_unstable_by_key(|x|x.0);
+    candidates.pop().map(|x|x.1)
+}
 fn parse_peer_table(report: &str) -> Option<String> {
     let mut peers=Vec::new();
     for line in report.lines() {
@@ -618,7 +652,11 @@ fn parse_peer_details(report: &str) -> Option<String> {
 }
 fn find_netbird_peer() -> Result<String, String> {
     let binary=netbird_binary()?;
-    // Table format on recent NetBird; --detail works on older versions.
+    // Stable JSON is supported by older and newer NetBird clients.
+    if let Ok(report)=netbird_cli_args(&binary,&["status","--json"]){
+        if let Some(ip)=parse_peer_json(&report){return Ok(ip);}
+    }
+    // Retain text fallbacks for NetBird versions with different JSON output.
     if let Ok(table)=netbird_cli_args(&binary,&["status","--table"]){
         if let Some(ip)=parse_peer_table(&table){return Ok(ip);}
     }
