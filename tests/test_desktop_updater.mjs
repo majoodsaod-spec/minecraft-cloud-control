@@ -76,7 +76,7 @@ test("Direct Paper accepts 8-character secrets in both Rust and Windows UI",()=>
 });
 
 test("NetBird lazy peers are dialed even before a handshake exists",()=>{
-  assert.match(rust,/matches!\(status\.as_str\(\),"connected"\|"connecting"\|"idle"\)/);
+  assert.match(rust,/matches!\(status\.as_str\(\),"connected"\|"connecting"\|"idle"\|"disconnected"\)/);
   assert.match(rust,/fn discovers_runner_from_netbird_table_and_details/);
   assert.match(rust,/Status: Idle/);
   assert.match(rust,/from_secs\(12\)/);
