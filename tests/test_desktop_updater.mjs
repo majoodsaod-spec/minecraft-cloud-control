@@ -52,8 +52,8 @@ test("NetBird background CLI never flashes Windows terminal windows",()=>{
   assert.match(rust,/fn hide_netbird_console/);
   assert.match(rust,/creation_flags\(0x0800_0000\)/);
   assert.match(rust,/hide_netbird_console\(std::process::Command::new\(&path\)\.arg\("version"\)\)/);
-  assert.match(rust,/hide_netbird_console\(std::process::Command::new\(exe\)\.arg\(operation\)\)/);
-  assert.match(rust,/hide_netbird_console\(\s*std::process::Command::new\(&binary\)/);
+  assert.match(rust,/hide_netbird_console\(std::process::Command::new\(exe\)\.args\(args\)\)/);
+  assert.match(rust,/fn find_netbird_peer\(\)[\s\S]*?netbird_cli_args\(&binary,\&\["status","--table"\]\)/);
   assert.match(rust,/starts_with\("connected"\)/);
 });
 test("background polling preserves unsaved user input and secret fields",()=>{
