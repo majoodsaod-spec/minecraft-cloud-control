@@ -253,3 +253,13 @@ body:has(.shell){background:var(--mc-bg)!important;color:var(--mc-ink)!important
  .shell .top .badge{font-size:10px}
  .shell .grid{grid-template-columns:1fr}
 }
+
+/* Calm, meaningful feedback for live state and transient surfaces. */
+.shell .top .badge{background:#f3f7f7!important;color:#657983!important;border-color:#e1e9e8!important}
+.shell .top .badge .dot{background:#d6a54b!important}
+.shell .toast:not(.hidden){animation:mc-scale 220ms var(--mc-ease) both}
+.shell .server-overview .server-progress-fill{transition:width 760ms var(--mc-ease)!important}
+.shell .file-tree-link:hover,.shell .file-tree-root:hover{transform:translateX(2px)}
+.shell .file-entry-actions .btn{min-height:33px!important}
+.shell .tabs{scrollbar-width:thin}
+@media(prefers-reduced-motion:reduce){.shell .toast:not(.hidden){animation:none}}
