@@ -178,3 +178,78 @@ h1,h2,h3,.server-title,.page-header h1,.hero-title{color:#23343b;letter-spacing:
     transition-duration:.01ms!important;scroll-behavior:auto!important;
   }
 }
+
+/* Cloudflare's legacy page shell, brought into the same layout as Windows. */
+body:has(.shell){background:var(--mc-bg)!important;color:var(--mc-ink)!important}
+.shell{grid-template-columns:242px minmax(0,1fr)!important;min-height:100vh}
+.shell .sidebar{padding:30px 14px 20px!important;gap:8px!important;position:sticky}
+.shell .brand{
+ display:flex;gap:12px;align-items:center;
+ margin:0 9px 31px;padding:0 4px 23px!important;font-size:14px!important;
+ font-weight:760!important;border-bottom:1px solid #e5edeb;
+}
+.shell .brand .cube{
+ width:40px;height:40px;min-width:40px;display:grid;place-items:center;
+ padding:0!important;font-size:22px;border-radius:13px;
+}
+.brand-wordmark{min-width:0;display:flex;flex-direction:column;gap:5px}
+.brand-wordmark strong{white-space:nowrap;letter-spacing:-.4px;font-size:14px}
+.brand-wordmark small{color:#98a7af;letter-spacing:1.8px;font-size:9px;font-weight:800}
+.shell .navs{display:flex;flex-direction:column;gap:4px}
+.shell .nav{height:44px;padding:10px 14px!important;width:100%!important}
+.shell .navfoot{margin-top:auto;padding:21px 12px 0;border-top:1px solid #e3ecea!important;font-size:11px!important}
+.shell main{padding:0 clamp(20px,4vw,54px) 55px!important;max-width:none!important;margin:0!important}
+.shell .top{
+ padding:18px clamp(20px,4vw,54px)!important;
+ margin:0 calc(-1 * clamp(20px,4vw,54px)) 29px!important;
+ min-height:85px;
+}
+.shell .top .eyebrow{font-size:10px!important;letter-spacing:1.6px}
+.shell h1{font-size:30px;margin:5px 0 0}
+.shell #page{padding-top:3px}
+.shell .panel.section{margin-top:20px}
+.shell .server-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
+.shell .server-stat{min-height:132px}
+.shell .stat b{color:#233d40}
+.shell .server-header .muted{color:#7e9695!important}
+.shell .stage-step{color:#84999a!important}.shell .stage-step.reached{color:#167655!important}
+.shell .file-explorer-main{color:var(--mc-ink)}
+.shell .file-upload-help,.file-pick-area .muted{color:#84969e!important}
+.shell a:not(.btn){color:#17886b}
+.shell a:not(.btn):hover{color:#116d57}
+.shell .status-number{color:#24433f}
+.shell .file-pick-button{padding:8px 15px!important}
+.shell .file-entry-name{background:transparent!important;border:0!important;box-shadow:none!important}
+.shell .file-entry-name:hover:not(:disabled){text-decoration:underline}
+.shell .console-command-row input{width:auto}
+.shell .file-list-tools select{color:#30444b!important}
+@media(max-width:960px){
+ .shell{grid-template-columns:205px minmax(0,1fr)!important}
+ .shell .server-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .shell .brand-wordmark strong{font-size:12px}
+}
+@media(max-width:720px){
+ .shell{display:block!important}
+ .shell .sidebar{
+   width:100%!important;height:auto!important;position:relative!important;
+   padding:14px 14px 8px!important;border-right:0!important;
+   border-bottom:1px solid var(--mc-stroke)!important
+ }
+ .shell .brand{border:0!important;margin:0 0 8px!important;padding:0!important}
+ .shell .brand-wordmark{display:flex}
+ .shell .navs{display:flex;flex-direction:row;overflow-x:auto;scroll-snap-type:x proximity;gap:5px;padding:5px 0 8px}
+ .shell .nav{width:auto!important;min-width:max-content;padding:9px 11px!important;font-size:12px!important;scroll-snap-align:start}
+ .shell .nav:hover{transform:none!important}
+ .shell main{padding:0 17px 35px!important}
+ .shell .top{margin:0 -17px 22px!important;padding:14px 17px!important;min-height:78px}
+ .shell h1{font-size:26px}
+ .shell .server-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .shell .dashboard-actions .btn{width:auto;flex:1 1 140px}
+}
+@media(max-width:480px){
+ .shell .server-metrics{grid-template-columns:1fr}
+ .shell .server-overview{padding:21px!important}
+ .shell .server-stat{min-height:105px}
+ .shell .top .badge{font-size:10px}
+ .shell .grid{grid-template-columns:1fr}
+}
