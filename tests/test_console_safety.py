@@ -35,6 +35,8 @@ class OptionalBridgeStartupTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             self.assertIsNone(bridge.start())
         self.assertIsNone(bridge.thread)
+        self.assertEqual(bridge.url, "")
+        self.assertEqual(bridge.token, "")
 
 
 if __name__ == "__main__":
