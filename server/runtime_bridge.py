@@ -334,4 +334,7 @@ class LiveBridge:
                 self._last_failure = ""
             # Healthy live console should refresh quickly; errors back off so we
             # do not overload Cloudflare or fill the runner logs.
-            time.sleep(1 if self._failures == 0 else min(60, 5 * 2 ** min(self._failures // 5, 4)))
+            # Preserve the 5-second dashboard refresh and live controls while
+            # keeping total Durable Object requests under the free 100k/day
+            # request quota (a 1-second 24/7 heartbeat alone uses 86,400).
+            time.sleep(2 if self._failures == 0 else min(60, 5 * 2 ** min(self._failures // 5, 4)))
