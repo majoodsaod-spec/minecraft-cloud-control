@@ -1,0 +1,83 @@
+name: Minecraft maintenance log
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Daily eligibility check; an actual maintenance entry is written once
+    # every 50 days (or when manually requested).
+    - cron: "41 4 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: minecraft-maintenance-log
+  cancel-in-progress: false
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install validation dependencies
+        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+      - name: Run due maintenance check and record numbered result
+        id: review
+        shell: bash
+        env:
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          if [[ "$MANUAL" == "true" ]]; then
+            python server/maintenance.py --force | tee "$RUNNER_TEMP/maintenance-result.txt"
+          else
+            python server/maintenance.py | tee "$RUNNER_TEMP/maintenance-result.txt"
+          fi
+          if grep -q '^MAINTENANCE_RUN=' "$RUNNER_TEMP/maintenance-result.txt"; then
+            echo "due=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "due=false" >> "$GITHUB_OUTPUT"
+          fi
+          if grep -q '^MAINTENANCE_FAILED=true' "$RUNNER_TEMP/maintenance-result.txt"; then
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Commit actual maintenance report
+        if: steps.review.outputs.due == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add maintenance/maintenance-log.md maintenance/status.json
+          if git diff --cached --quiet; then
+            echo "No maintenance changes to commit."
+            exit 0
+          fi
+          number=$(python -c 'import json;print(json.load(open("maintenance/status.json"))["number"])')
+          git commit -m "Maintenance #$number: record real repository health checks"
+          git push origin "HEAD:${{ github.ref_name }}"
+      - name: Publish result summary
+        if: steps.review.outputs.due == 'true'
+        shell: bash
+        run: |
+          {
+            echo "### Minecraft maintenance report"
+            echo ""
+            tail -n 10 maintenance/maintenance-log.md
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Report detected failures
+        if: steps.review.outputs.failed == 'true'
+        run: |
+          echo "::error::Maintenance checks failed. Inspect the detailed CI output and maintenance/maintenance-log.md."
+          exit 1
