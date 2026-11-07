@@ -460,6 +460,10 @@ mod netbird_lifecycle_tests {
     fn discovers_runner_from_netbird_table_and_details() {
         assert_eq!(runner_peer_id("minecraft-paper-42389453154.netbird.cloud"),Some(42389453154));
         assert_eq!(runner_peer_id("minecraft-paper-42389453154"),Some(42389453154));
+        assert_eq!(runner_peer_id("minecraft-paper-42396124824-29-165.netbird.cloud"),Some(42396124824));
+        assert_eq!(runner_peer_id("minecraft-paper-42394763848-93-185.netbird.cloud"),Some(42394763848));
+        assert_eq!(runner_peer_id("minecraft-paper-42396124824-other.netbird.cloud"),None);
+        assert_eq!(runner_peer_id("minecraft-paper-42396124824-29-nope.netbird.cloud"),None);
         assert_eq!(parse_peer_table("NAME IP STATUS CONN\nminecraft-paper-42389453154.netbird.cloud 100.94.2.7 Connected Relayed\n"),
             Some("100.94.2.7".to_owned()));
         assert_eq!(parse_peer_table("NAME IP STATUS CONN\nminecraft-paper-42389453154 100.94.2.7 Idle -\n"),
@@ -470,6 +474,11 @@ mod netbird_lifecycle_tests {
             Some("100.94.2.7".to_owned()));
         assert_eq!(parse_peer_details("Peers detail:\n minecraft-paper-42389453154.netbird.cloud:\n  NetBird IP: 100.94.2.7\n  Status: Connected\n"),
             Some("100.94.2.7".to_owned()));
+        // Windows NetBird 0.82 appends the last two IPv4 octets to peer names.
+        assert_eq!(parse_peer_details("minecraft-paper-42396124824-29-165.netbird.cloud:\n  NetBird IP: 100.93.29.165\n  Status: Idle\n\n minecraft-paper-42394763848-93-185.netbird.cloud:\n  NetBird IP: 100.93.93.185\n  Status: Idle\n"),
+            Some("100.93.29.165".to_owned()));
+        assert_eq!(parse_peer_table("NAME IP STATUS CONN\nminecraft-paper-42396124824-29-165.netbird.cloud 100.93.29.165 Idle -\n"),
+            Some("100.93.29.165".to_owned()));
     }
     #[test]
     fn discovers_runner_from_netbird_json() {
@@ -481,6 +490,10 @@ mod netbird_lifecycle_tests {
           ]}
         }"#;
         assert_eq!(parse_peer_json(report),Some("100.94.2.7".into()));
+        assert_eq!(parse_peer_json(r#"{"peers":{"details":[
+          {"fqdn":"minecraft-paper-42394763848-93-185.netbird.cloud","netbirdIp":"100.93.93.185","status":"Idle"},
+          {"fqdn":"minecraft-paper-42396124824-29-165.netbird.cloud","netbirdIp":"100.93.29.165","status":"Idle"}
+        ]}}"#),Some("100.93.29.165".into()));
         assert_eq!(parse_peer_json(r#"{"peers":{"details":[
           {"fqdn":"minecraft-paper-42389453154.netbird.cloud",
            "netbirdIp":"100.94.2.7","status":"Disconnected"}
@@ -583,13 +596,21 @@ fn private_overlay_ip(value: &str) -> bool {
     parts[0]==100 && (64..=127).contains(&parts[1])
 }
 
-// NetBird may show the short hostname or its full .netbird.cloud FQDN.
-// Always match the numeric GitHub run ID from the first hostname label.
+// NetBird may append the final IPv4 octets to its hostname to keep names unique:
+// minecraft-paper-<run_id>-29-165.netbird.cloud. Keep the numeric GitHub
+// run ID for ordering, and reject unrelated or malformed hostnames.
 fn runner_peer_id(name: &str) -> Option<u64> {
-    name.split('.').next()?
-        .to_ascii_lowercase()
-        .strip_prefix("minecraft-paper-")?
-        .parse::<u64>().ok().filter(|run| *run>0)
+    let hostname = name.split('.').next()?.to_ascii_lowercase();
+    let suffix = hostname.strip_prefix("minecraft-paper-")?;
+    let mut parts = suffix.split('-');
+    let run_id = parts.next()?.parse::<u64>().ok().filter(|run| *run > 0)?;
+    let extra = parts.collect::<Vec<_>>();
+    if !extra.is_empty() && (extra.len() != 2 || extra.iter().any(|part|
+        part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit())
+    )) {
+        return None;
+    }
+    Some(run_id)
 }
 // NetBird officially exposes stable JSON: peers.details[] contains fqdn,
 // netbirdIp and status. Prefer this over terminal text parsing.
