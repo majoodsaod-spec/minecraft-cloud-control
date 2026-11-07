@@ -147,7 +147,7 @@ async fn github_job_log(job_id: u64) -> Result<String, String> {
         }
     }
     let output=String::from_utf8_lossy(&tail);
-    Ok(output.lines().rev().take(160).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\\n"))
+    Ok(output.lines().rev().take(160).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))
 }
 #[tauri::command]
 async fn github_file(path: String) -> Result<Value, String> {
