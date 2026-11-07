@@ -274,7 +274,7 @@ async function loadGithubServerLog(quiet=true){
 async function refresh(quiet=false){
   if(state.busy)return;state.busy=true;$("#refresh").disabled=true;
   try{
-    await Promise.all([loadOverview(quiet),loadCloud(true),loadDirect(true)]);
+    await Promise.all([loadOverview(quiet),loadCloud(true),loadDirect(true),loadNetbirdAuto()]);
     if(state.page==="workflows"&&state.github.connected){
       try{state.workflows=await run("github_workflows",{}, {quiet:true});}catch{}
     }
