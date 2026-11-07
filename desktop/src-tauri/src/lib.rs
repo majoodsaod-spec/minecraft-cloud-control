@@ -599,7 +599,7 @@ fn direct_client() -> Result<reqwest::Client, String> {
 }
 async fn direct_request(kind: &str, command: Option<Value>) -> Result<Value, String> {
     let token=secret(DIRECT_SECRET).map_err(|_|"Direct Paper needs a separate secret. Set MINECRAFT_DIRECT_TOKEN in GitHub Actions Secrets, then enter the exact same value under Connections → Direct Paper.".to_owned())?;
-    if token.len()<24 {return Err("Direct control token must be at least 24 characters".into());}
+    if token.len()<8 {return Err("Direct control token must be at least 8 characters".into());}
     let ip=direct_peer_ip()?;
     let url=format!("http://{ip}:8765/api/{kind}");
     let client=direct_client()?;
@@ -621,8 +621,8 @@ async fn direct_request(kind: &str, command: Option<Value>) -> Result<Value, Str
 #[tauri::command]
 fn direct_configure(token: String, peer_ip: String) -> Result<(), String> {
     let trimmed=token.trim();
-    if trimmed.len()<24 || trimmed.len()>512 {
-        return Err("Enter a strong direct-control token (at least 24 characters)".into());
+    if trimmed.len()<8 || trimmed.len()>512 {
+        return Err("Enter a direct-control token (at least 8 characters)".into());
     }
     let peer=peer_ip.trim();
     if !peer.is_empty() && !private_overlay_ip(peer) {
