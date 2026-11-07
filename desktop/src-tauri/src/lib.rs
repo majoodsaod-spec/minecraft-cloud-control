@@ -124,6 +124,32 @@ async fn github_jobs(run_id: u64) -> Result<Value, String> {
     Ok(github(&format!("/actions/runs/{run_id}/jobs?per_page=100"),reqwest::Method::GET,None).await?["jobs"].clone())
 }
 #[tauri::command]
+async fn github_job_log(job_id: u64) -> Result<String, String> {
+    let token=secret(GITHUB_SECRET)?;
+    let url=format!("https://api.github.com/repos/{REPO}/actions/jobs/{job_id}/logs");
+    let response=http().get(url).bearer_auth(token)
+        .header("Accept","application/vnd.github+json").send().await
+        .map_err(|_|"Couldn't retrieve GitHub Actions job logs".to_owned())?;
+    if !response.status().is_success() {
+        return Err(format!("GitHub couldn't retrieve job logs (HTTP {})",response.status().as_u16()));
+    }
+    use futures_util::StreamExt;
+    let mut stream=response.bytes_stream();
+    let mut tail=Vec::new();
+    while let Some(part)=stream.next().await {
+        let chunk=part.map_err(|_|"Job log download interrupted")?;
+        tail.extend_from_slice(&chunk);
+        // Keep only a bounded tail rather than downloading a giant
+        // multi-hour Minecraft log into the lightweight desktop window.
+        if tail.len()>512_000 {
+            let excess=tail.len()-512_000;
+            tail.drain(..excess);
+        }
+    }
+    let output=String::from_utf8_lossy(&tail);
+    Ok(output.lines().rev().take(160).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\\n"))
+}
+#[tauri::command]
 async fn github_file(path: String) -> Result<Value, String> {
     if !valid_path(&path) { return Err("Invalid repository file path".into()); }
     let encoded=path.split('/').map(urlencoding::encode).map(|s|s.to_string()).collect::<Vec<_>>().join("/");
@@ -223,7 +249,7 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             connect_github,disconnect_github,github_status,github_overview,
-            github_workflows,github_runs,github_dispatch,github_cancel,github_jobs,
+            github_workflows,github_runs,github_dispatch,github_cancel,github_jobs,github_job_log,
             github_file,github_save_file,github_download_backup,
             configure_cloudflare,cloudflare_status,cloudflare_command,cloudflare_console
         ])
