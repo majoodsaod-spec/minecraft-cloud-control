@@ -59,7 +59,8 @@ class LiveBridge:
             print("Cloudflare live bridge not configured; console and player controls unavailable",flush=True)
             return
         if not self.url.startswith("https://"):
-            raise ValueError("Cloudflare bridge requires HTTPS")
+            print("Cloudflare live bridge disabled: control URL must use HTTPS", flush=True)
+            return
         self.thread=threading.Thread(target=self._loop,daemon=True)
         self.thread.start()
         print("Cloudflare live bridge enabled",flush=True)
