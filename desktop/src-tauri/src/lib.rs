@@ -172,6 +172,145 @@ async fn github_save_file(args: RepoWrite) -> Result<Value, String> {
     github(&format!("/contents/{encoded}"),reqwest::Method::PUT,
         Some(json!({"branch":"main","message":args.message,"content":args.content_base64,"sha":args.sha}))).await
 }
+// An update reuses the existing GitHub-built NSIS installer. It upgrades
+// the current Windows installation; users don't extract artifact ZIPs by hand.
+// Builds are limited to successfully completed main-branch workflow runs.
+const INSTALLER_WORKFLOW: &str = "build-windows.yml";
+const INSTALLER_ARTIFACT: &str = "Minecraft-Cloud-Windows-Installer";
+const DOWNLOAD_LIMIT: u64 = 250 * 1024 * 1024;
+
+fn installed_build() -> u64 {
+    option_env!("MC_DESKTOP_BUILD_RUN_ID").unwrap_or("0").parse().unwrap_or(0)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateCheck {
+    available: bool,
+    current_build: u64,
+    latest_build: u64,
+    run_number: u64,
+    commit: String,
+    artifact_id: u64,
+}
+
+async fn current_update() -> Result<UpdateCheck, String> {
+    // GitHub returns newest first. Never offer unfinished, failing, or
+    // arbitrary-branch artifacts as application updates.
+    let path=format!("/actions/workflows/{INSTALLER_WORKFLOW}/runs?branch=main&status=success&per_page=12");
+    let runs=github(&path, reqwest::Method::GET, None).await?;
+    let candidates=runs["workflow_runs"].as_array()
+        .ok_or("GitHub did not return a list of installer builds")?;
+    for run in candidates {
+        if run["status"].as_str()!=Some("completed")
+            || run["conclusion"].as_str()!=Some("success")
+            || run["head_branch"].as_str()!=Some("main") {
+            continue;
+        }
+        let run_id=run["id"].as_u64().unwrap_or(0);
+        if run_id==0 {continue;}
+        let artifacts=github(&format!("/actions/runs/{run_id}/artifacts?per_page=100"),
+            reqwest::Method::GET, None).await?;
+        let artifact=artifacts["artifacts"].as_array().and_then(|items| items.iter().find(|a|
+            a["name"].as_str()==Some(INSTALLER_ARTIFACT)
+            && a["expired"].as_bool()==Some(false)
+            && a["size_in_bytes"].as_u64().unwrap_or(u64::MAX)<DOWNLOAD_LIMIT
+        ));
+        if let Some(artifact)=artifact {
+            let artifact_id=artifact["id"].as_u64().unwrap_or(0);
+            if artifact_id==0 {continue;}
+            return Ok(UpdateCheck {
+                available:run_id>installed_build(),
+                current_build:installed_build(),latest_build:run_id,
+                run_number:run["run_number"].as_u64().unwrap_or(0),
+                commit:run["head_sha"].as_str().unwrap_or("").chars().take(12).collect(),
+                artifact_id,
+            });
+        }
+    }
+    Err("No successful Windows installer artifact is available yet. Check the GitHub Actions installer workflow.".into())
+}
+
+#[tauri::command]
+async fn desktop_check_update() -> Result<UpdateCheck, String> {
+    current_update().await
+}
+
+#[tauri::command]
+async fn desktop_install_update(app: tauri::AppHandle, expected_build: u64) -> Result<(), String> {
+    // Recheck immediately before downloading, so callers cannot inject an
+    // arbitrary artifact ID and install an unrelated executable.
+    let update=current_update().await?;
+    if !update.available || update.latest_build!=expected_build {
+        return Err("That update is no longer current. Check for updates again.".into());
+    }
+    let token=secret(GITHUB_SECRET)?;
+    let url=format!("https://api.github.com/repos/{REPO}/actions/artifacts/{}/zip",update.artifact_id);
+    let response=http().get(url).bearer_auth(token)
+        .header("Accept","application/vnd.github+json").send().await
+        .map_err(|_|"Couldn't download the Windows update from GitHub".to_owned())?;
+    if !response.status().is_success() {
+        return Err(format!("Windows update download failed (HTTP {})",response.status().as_u16()));
+    }
+    if response.content_length().unwrap_or(0)>DOWNLOAD_LIMIT {
+        return Err("Update exceeds the download safety limit".into());
+    }
+    let dir=std::env::temp_dir().join("MinecraftCloudUpdates").join(update.latest_build.to_string());
+    tokio::fs::create_dir_all(&dir).await
+        .map_err(|_|"Couldn't create a temporary update directory")?;
+    let zip_file=dir.join("installer.zip");
+    let mut output=tokio::fs::File::create(&zip_file).await
+        .map_err(|_|"Couldn't write the downloaded update")?;
+    use tokio::io::AsyncWriteExt;
+    use futures_util::StreamExt;
+    let mut stream=response.bytes_stream();
+    let mut total=0_u64;
+    while let Some(next)=stream.next().await {
+        let chunk=next.map_err(|_|"The update download was interrupted")?;
+        total+=chunk.len() as u64;
+        if total>DOWNLOAD_LIMIT {
+            let _=tokio::fs::remove_file(&zip_file).await;
+            return Err("Update exceeds the download safety limit".into());
+        }
+        output.write_all(&chunk).await.map_err(|_|"Couldn't save the update")?;
+    }
+    output.flush().await.map_err(|_|"Couldn't finish the update download")?;
+    drop(output);
+
+    // Extract only a filename-matched installer, never arbitrary ZIP paths.
+    // The ZIP comes from the latest successful workflow in our own repository.
+    let installer=dir.join("MinecraftCloud-Update-Setup.exe");
+    let zip_source=zip_file.clone();
+    let dest=installer.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let file=std::fs::File::open(&zip_source).map_err(|_|"Couldn't open the downloaded ZIP")?;
+        let mut archive=zip::ZipArchive::new(file).map_err(|_|"Invalid installer artifact ZIP")?;
+        let mut matched=0;
+        for i in 0..archive.len() {
+            let mut entry=archive.by_index(i).map_err(|_|"Couldn't read update ZIP")?;
+            let path=std::path::Path::new(entry.name());
+            // GitHub artifact ZIP entries should contain a single NSIS setup
+            // executable at the root, never an arbitrary nested path.
+            let basename=path.file_name().and_then(|n|n.to_str()).unwrap_or("");
+            if path.components().count()!=1 || !basename.ends_with("-setup.exe") {continue;}
+            if entry.size()>DOWNLOAD_LIMIT {return Err("Installer is unexpectedly large".into());}
+            matched+=1;
+            if matched>1 {return Err("Artifact contains multiple installers".into());}
+            let mut dst=std::fs::File::create(&dest).map_err(|_|"Can't extract setup executable")?;
+            std::io::copy(&mut entry,&mut dst).map_err(|_|"Installer extraction failed")?;
+        }
+        if matched!=1 {return Err("No Windows NSIS setup executable in the artifact".into());}
+        Ok(())
+    }).await.map_err(|_|"Update extraction failed")??;
+
+    // This is an in-place NSIS upgrade for the same Tauri app identifier.
+    // Launch first, then close our own process so Windows can replace files.
+    std::process::Command::new(installer)
+        .spawn().map_err(|_|"Windows couldn't launch the update installer")?;
+    app.exit(0);
+    Ok(())
+}
+
 #[tauri::command]
 async fn github_download_backup(artifact_id: u64) -> Result<String, String> {
     let token=secret(GITHUB_SECRET)?;
@@ -251,6 +390,7 @@ pub fn run() {
             connect_github,disconnect_github,github_status,github_overview,
             github_workflows,github_runs,github_dispatch,github_cancel,github_jobs,github_job_log,
             github_file,github_save_file,github_download_backup,
+            desktop_check_update,desktop_install_update,
             configure_cloudflare,cloudflare_status,cloudflare_command,cloudflare_console
         ])
         .run(tauri::generate_context!())
