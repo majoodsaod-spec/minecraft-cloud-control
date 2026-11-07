@@ -140,16 +140,21 @@ def run(jar: Path) -> None:
     )
     ready = threading.Event()
     lock = threading.Lock()
+    input_lock = threading.Lock()  # Cloudflare and NetBird share the same Paper stdin.
     players = set()
     log_lines = deque(maxlen=100)
     bridge_restart = threading.Event()
     bridge_shutdown = threading.Event()
     observed = {"empty_since": time.monotonic(), "count": 0}
     def send(cmd: str) -> None:
-        if proc.poll() is None:
-            assert proc.stdin is not None
-            proc.stdin.write(cmd + "\n")
-            proc.stdin.flush()
+        # Keep each command line atomic across the direct API, Cloudflare
+        # bridge and lifecycle thread. Never interleave 'save-all' with a
+        # concurrent admin command while a shutdown is in progress.
+        with input_lock:
+            if proc.poll() is None:
+                assert proc.stdin is not None
+                proc.stdin.write(cmd + "\n")
+                proc.stdin.flush()
     def logs() -> None:
         assert proc.stdout is not None
         for line in proc.stdout:
