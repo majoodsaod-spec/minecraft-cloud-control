@@ -290,11 +290,22 @@ export default {
       const token=(request.headers.get("Authorization")||"").replace(/^Bearer /,"");
       if(!token||!await equals(token,env.BRIDGE_TOKEN))return json({error:"Unauthorized"},401);
       if(request.method!=="POST")return json({error:"Method not allowed"},405);
-      try {
-        const input=await request.json();
-        if(!input.session||typeof input.session!=="string"||input.session.length>128)return json({error:"Missing runner session"},400);
+      let input;
+      try{
+        input=await request.json();
+      }catch{
+        return json({error:"Invalid heartbeat JSON"},400);
+      }
+      if(!input||typeof input.session!=="string"||!input.session||input.session.length>128)
+        return json({error:"Missing runner session"},400);
+      try{
         return json(await bridgeCall(env,"heartbeat",input));
-      }catch(e){return json({error:String(e.message)},400)}
+      }catch(e){
+        // A failed Durable Object write is an upstream failure, not a bad
+        // request. Let the runner distinguish it from malformed telemetry.
+        console.error("Minecraft bridge heartbeat failure:",e);
+        return json({error:"Live bridge storage or Worker failure"},502);
+      }
     }
     if (path === "/api/control") return handleControl(request, env);
     if (path.startsWith("/api/")) return json({error:"Unknown API route"},404);
