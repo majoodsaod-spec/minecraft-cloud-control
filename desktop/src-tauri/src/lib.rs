@@ -462,6 +462,12 @@ mod netbird_lifecycle_tests {
         assert_eq!(runner_peer_id("minecraft-paper-42389453154"),Some(42389453154));
         assert_eq!(parse_peer_table("NAME IP STATUS CONN\nminecraft-paper-42389453154.netbird.cloud 100.94.2.7 Connected Relayed\n"),
             Some("100.94.2.7".to_owned()));
+        assert_eq!(parse_peer_table("NAME IP STATUS CONN\\nminecraft-paper-42389453154 100.94.2.7 Idle -\\n"),
+            Some("100.94.2.7".to_owned()));
+        assert_eq!(parse_peer_table("NAME IP STATUS CONN\\nminecraft-paper-42389453154 100.94.2.7 Connecting -\\n"),
+            Some("100.94.2.7".to_owned()));
+        assert_eq!(parse_peer_details("Peers detail:\\n minecraft-paper-42389453154.netbird.cloud:\\n  NetBird IP: 100.94.2.7\\n  Status: Idle\\n"),
+            Some("100.94.2.7".to_owned()));
         assert_eq!(parse_peer_details("Peers detail:\n minecraft-paper-42389453154.netbird.cloud:\n  NetBird IP: 100.94.2.7\n  Status: Connected\n"),
             Some("100.94.2.7".to_owned()));
     }
@@ -566,7 +572,11 @@ fn parse_peer_table(report: &str) -> Option<String> {
         let cols=line.split_whitespace().collect::<Vec<_>>();
         if cols.len()<3 {continue;}
         let Some(id)=runner_peer_id(cols[0]) else {continue;};
-        if !private_overlay_ip(cols[1]) || !cols[2].eq_ignore_ascii_case("connected") {continue;}
+        // NetBird lazy connections are "Idle" until the first packet opens a
+        // WireGuard session. Rejecting Idle here prevents that first packet.
+        if !private_overlay_ip(cols[1]) {continue;}
+        let status=cols[2].to_ascii_lowercase();
+        if !matches!(status.as_str(),"connected"|"connecting"|"idle") {continue;}
         peers.push((id,cols[1].to_owned()));
     }
     peers.sort_unstable_by_key(|x|x.0);
@@ -597,7 +607,9 @@ fn parse_peer_details(report: &str) -> Option<String> {
             ip=Some(value.trim().split('/').next().unwrap_or("").to_owned());
         }
         if let Some(value)=trimmed.strip_prefix("Status:"){
-            connected=value.trim().eq_ignore_ascii_case("Connected");
+            // Idle peers can be awakened by the first authenticated HTTP request.
+            connected=matches!(value.trim().to_ascii_lowercase().as_str(),
+                "connected"|"connecting"|"idle");
         }
     }
     finish(id,ip,connected);
@@ -630,7 +642,7 @@ fn direct_peer_ip() -> Result<String, String> {
 fn direct_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
       .no_proxy()
-      .timeout(std::time::Duration::from_secs(6))
+      .timeout(std::time::Duration::from_secs(12))
       .build().map_err(|_|"Couldn't create private connection".to_owned())
 }
 async fn direct_request(kind: &str, command: Option<Value>) -> Result<Value, String> {
