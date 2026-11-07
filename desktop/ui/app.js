@@ -196,7 +196,11 @@ async function action(type,id){
       const jobs=await run("github_jobs",{runId:Number(id)});
       const list=Array.isArray(jobs)?jobs:[];
       const summary=list.map(job=>`${job.name} — ${job.conclusion||job.status}\n${(job.steps||[]).map(s=>`  ${s.conclusion==="success"?"✓":s.conclusion==="failure"?"✕":"·"} ${s.name}`).join("\n")}`).join("\n\n");
-      await dialog("Workflow run #"+id,summary||"No job details yet.");
+      const view=await dialog("Workflow run #"+id,(summary||"No job details yet.")+"\\n\\nSelect Continue to open the first job's latest 160 log lines.");
+      if(view&&list.length){
+        const logs=await run("github_job_log",{jobId:Number(list[0].id)});
+        await dialog("Job logs · "+(list[0].name||"GitHub Actions"),logs||"No logs available yet.");
+      }
     }catch{}return;
   }
   case "filter-runs":{
