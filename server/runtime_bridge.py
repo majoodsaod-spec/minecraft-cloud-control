@@ -337,4 +337,7 @@ class LiveBridge:
             # Preserve the 5-second dashboard refresh and live controls while
             # keeping total Durable Object requests under the free 100k/day
             # request quota (a 1-second 24/7 heartbeat alone uses 86,400).
-            time.sleep(2 if self._failures == 0 else min(60, 5 * 2 ** min(self._failures // 5, 4)))
+            # Once a Worker is upgraded or the daily quota resets, reconnect
+            # promptly: the UI regards telemetry older than 45 s as offline.
+            # Retry at most every 15 s on failure; never pound the API.
+            time.sleep(2 if self._failures == 0 else min(15, 5 * 2 ** min(self._failures // 5, 3)))
