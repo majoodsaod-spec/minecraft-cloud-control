@@ -92,7 +92,9 @@ class DirectControl:
                 if self.path != "/api/command":
                     return self.reply(404, {"error": "Unknown endpoint"})
                 length = self.headers.get("Content-Length")
-                if not length or not length.isdecimal() or not 0 < int(length) <= 65536:
+                # Base64-encoded file writes expand by ~4/3. Match the
+                # bridge's 256 KiB file cap plus JSON framing overhead.
+                if not length or not length.isdecimal() or not 0 < int(length) <= 512 * 1024:
                     return self.reply(413, {"error": "Invalid command size"})
                 try:
                     body = json.loads(self.rfile.read(int(length)))
