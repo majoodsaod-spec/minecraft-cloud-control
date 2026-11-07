@@ -310,7 +310,7 @@ def run(jar: Path) -> None:
             # unavailable or still reports desired=on. This flag is consumed
             # by the workflow only after successful backup validation.
             if bridge_shutdown.is_set():
-                (OUTPUT / "stop-requested").write_text("true\\n")
+                (OUTPUT / "stop-requested").write_text("true\n")
                 print("Safe stop recorded; successor workflow will not be dispatched", flush=True)
         else:
             raise RuntimeError("No verified clean shutdown; refusing backup/automatic handoff")
