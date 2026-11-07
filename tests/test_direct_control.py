@@ -97,6 +97,24 @@ class DirectControlTests(unittest.TestCase):
                 result = json.load(response)
             self.assertTrue(result["ok"])
             self.assertEqual(bridge.sent, [{"type": "save", "args": {}}])
+
+            # Commands with base64 file content can exceed 64 KiB even
+            # when the original file is within the 256 KiB bridge limit.
+            large_request = urllib.request.Request(
+                base + "/command",
+                data=json.dumps({
+                    "type": "files-upload",
+                    "args": {"path": "example.txt", "content_base64": "A" * 180000},
+                }).encode(),
+                headers={
+                    "Authorization": "Bearer eightchars",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            with opener.open(large_request, timeout=3) as response:
+                self.assertTrue(json.load(response)["ok"])
+            self.assertEqual(len(bridge.sent), 2)
         finally:
             control.stop()
 
