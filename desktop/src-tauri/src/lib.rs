@@ -508,24 +508,31 @@ fn auto_netbird_enabled() -> bool {
 }
 
 fn connect_netbird_if_needed(ownership: &Mutex<NetbirdOwnership>) -> Result<bool, String> {
+    // Serialize startup and shutdown: otherwise closing the GUI while
+    // "netbird up" is finishing could leave the system-wide VPN connected.
+    let mut state=ownership.lock().map_err(|_|"NetBird state unavailable".to_owned())?;
+    if state.connected_by_app {return Ok(false);}
     let exe=netbird_binary()?;
     let report=netbird_cli(&exe,"status")?;
     if netbird_is_connected(&report) {return Ok(false);}
     netbird_cli(&exe,"up")?;
-    if !netbird_is_connected(&netbird_cli(&exe,"status")?) {
-        return Err("NetBird couldn't connect. Sign in using the NetBird app.".into());
+    // The "up" command succeeded. Own the connection immediately, even
+    // while it is still negotiating with the NetBird management service.
+    state.connected_by_app=true;
+    for _ in 0..12 {
+        if let Ok(report)=netbird_cli(&exe,"status") {
+            if netbird_is_connected(&report){return Ok(true);}
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
     }
-    ownership.lock().map_err(|_|"NetBird state unavailable")?.connected_by_app=true;
-    Ok(true)
+    Err("NetBird started but is still connecting. Check its desktop client; Minecraft Cloud will keep the VPN managed and disconnect it on exit.".into())
 }
 
 fn disconnect_owned_netbird(ownership: &Mutex<NetbirdOwnership>) {
-    let was_owned=ownership.lock().map(|mut state|{
-        let owned=state.connected_by_app;
-        state.connected_by_app=false;
-        owned
-    }).unwrap_or(false);
+    let Ok(mut state)=ownership.lock() else {return;};
+    let was_owned=state.connected_by_app;
     if !was_owned {return;}
+    state.connected_by_app=false;
     if let Ok(exe)=netbird_binary() {
         let _=netbird_cli(&exe,"down");
     }
