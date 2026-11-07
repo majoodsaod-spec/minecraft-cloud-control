@@ -52,7 +52,13 @@ const serverPhase = () => {
   }
   if (fresh&&state.ready)return "online";
   if (fresh)return "starting";
-  if (cloudState.active.length)return "starting";
+  if (cloudState.active.length){
+    // A GitHub Actions job can be running without any live Paper telemetry.
+    // Don't claim Paper is still booting indefinitely in that situation.
+    const active=cloudState.active[0]||{};
+    const age=active.created_at?Date.now()-Date.parse(active.created_at):0;
+    return Number.isFinite(age)&&age>120000?"bridge_missing":"starting";
+  }
   return bridge.desired==="off"?"stopped":"offline";
 };
 const isBridgeLive=()=>Boolean(cloudState?.bridge?.status?.session && Date.now()-(cloudState.bridge.status.updatedAt||0)<45000 && cloudState.bridge.status.ready);
@@ -64,6 +70,7 @@ const displayDuration=seconds=>{
 const phaseInfo={
   online:["Online","Your Minecraft server is ready for players.","good",100],
   starting:["Starting","Preparing your world and launching the server.","waiting",12],
+  bridge_missing:["Live status unavailable","GitHub Actions is active, but the dashboard has no recent Paper heartbeat. The server may still be online.","waiting",0],
   shutdown_requested:["Preparing to stop","Shutdown requested. Waiting for the server to begin saving.","waiting",14],
   saving:["Saving","Kicking players and flushing world and player data.","waiting",32],
   stopping:["Stopping","Waiting for the server to shut down cleanly.","waiting",55],
@@ -240,7 +247,9 @@ overview=function(p){
   actions.append(proAction("↻ Save & restart",()=>proCommand("restart",{},"Save the world, disconnect players, and restart the server?"),"outline",!safeStop));
   actions.append(proAction("⟳ Refresh",()=>cloudRefresh(true)));
   if(["saving","stopping","backing_up","finishing"].includes(phase))proNotice(controls,"Safe shutdown is in progress. Please keep the server running until backup verification completes.");
-  if(!isBridgeLive()&&cloudState.active.length)proNode(controls,"p","muted small","Waiting for the server's secure live connection before enabling safe controls.");
+  if(!isBridgeLive()&&cloudState.active.length)proNode(controls,"p","muted small",phase==="bridge_missing"
+    ?"No live heartbeat: check the GitHub Actions server log for 'Cloudflare live bridge enabled' or 'Cloudflare bridge connection failed'. Also check Worker BRIDGE_TOKEN, MC_BRIDGE Durable Object binding, and GitHub CLOUDFLARE_CONTROL_URL / CLOUDFLARE_BRIDGE_TOKEN."
+    :"Waiting for the server's secure live connection before enabling safe controls.");
   const extras=proPanel(p,"Quick access");
   const links=proNode(extras,"div","dashboard-actions");
   for(const [label,id] of [["Server settings","settings"],["Online players","players"],["Live console","console"],["World backups","worlds"],["Files","files"],["Plugins","plugins"]]){
