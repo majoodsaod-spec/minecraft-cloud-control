@@ -185,11 +185,11 @@ def run(jar: Path) -> None:
     signal.signal(signal.SIGINT, interrupted)
     bridge=LiveBridge(DATA,os.environ.get("GITHUB_RUN_ID",str(int(time.time()))),
                       players,lock,log_lines,ready,send,bridge_restart,bridge_shutdown,observed,proc.pid)
-    bridge.start()
     direct=DirectControl(bridge)
-    direct.start()
     graceful = False
     try:
+        bridge.start()
+        direct.start()
         if not ready.wait(180) or proc.poll() is not None:
             raise RuntimeError("Paper failed to start")
         started = time.monotonic()
