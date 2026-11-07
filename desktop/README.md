@@ -98,3 +98,11 @@ A GitHub Actions workflow marked `in_progress` means only that its workflow is a
 The Overview now displays **GitHub workflow status, run number, and approximate elapsed time separately** from Paper metrics. Use **View Minecraft logs** for a direct GitHub read-only job-log snapshot when available.
 
 To enable actual live metrics, open **Connections** and enter the prefilled Minecraft Cloud Worker URL and your **Cloudflare dashboard admin password** (the GitHub personal access token is not this password), then select **Save and test live connection**. A Cloudflare Durable Object quota outage or a broken bridge still needs repairing separately; no Windows UI change can invent the missing telemetry. You do **not** need to change the Minecraft server's Playit address.
+
+## Optional NetBird automatic connect/disconnect
+
+Open **Connections → Direct Paper · NetBird** and enable **Automatically connect NetBird**. On future desktop launches, Minecraft Cloud runs the installed NetBird CLI to bring up your existing authenticated VPN profile. When Minecraft Cloud exits, it calls NetBird `down` **only if Minecraft Cloud started that connection**. It never disconnects NetBird when you were already connected before the app opened. Disabling the option also releases a connection that the app owns.
+
+The setting is off by default, stored locally in Windows Credential Manager, and needs no Cloudflare service. You must first install and sign in to NetBird manually. If the VPN client is missing, requires authorization, or cannot connect, the desktop app and GitHub functions continue working. **NetBird is a system-wide VPN**, so connecting or disconnecting it can also affect other apps that depend on the private network.
+
+Connecting NetBird alone is not enough for a private Paper console: the runner must start using the new NetBird workflow and you must separately configure the strong `MINECRAFT_DIRECT_TOKEN` shared secret on both GitHub Actions and the Windows app. Keep both setup keys and direct-control tokens out of screenshots and chat.
