@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+use tauri::Manager;
 
 
 const REPO: &str = "majoodsaod-spec/minecraft-cloud-control";
@@ -383,6 +384,117 @@ async fn cloudflare_console(command:String)->Result<Value,String> {
     if !response.status().is_success(){return Err(format!("Live console HTTP {}",response.status().as_u16()));}
     response.json().await.map_err(|_|"Invalid console reply".into())
 }
+// NetBird is a system-wide VPN. Automatic connection is opt-in and this
+// process only disconnects a connection it started itself. Never shut down a
+// VPN session that was already active when Minecraft Cloud opened.
+const AUTO_NETBIRD: &str = "auto-netbird-on-open";
+#[derive(Default)]
+struct NetbirdOwnership { connected_by_app: bool }
+
+fn netbird_binary() -> Result<std::path::PathBuf, String> {
+    let candidates=[
+        std::path::PathBuf::from(r"C:\Program Files\NetBird\netbird.exe"),
+        std::path::PathBuf::from(r"C:\Program Files\NetBird\bin\netbird.exe"),
+        std::path::PathBuf::from(r"C:\Program Files (x86)\NetBird\netbird.exe"),
+        std::path::PathBuf::from("netbird"),
+    ];
+    for path in candidates {
+        if std::process::Command::new(&path).arg("version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status().map(|s|s.success()).unwrap_or(false) {
+            return Ok(path);
+        }
+    }
+    Err("NetBird CLI wasn't found. Install and sign in to NetBird first.".into())
+}
+
+fn netbird_cli(exe: &std::path::Path, operation: &str) -> Result<String, String> {
+    let mut child=std::process::Command::new(exe).arg(operation)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn().map_err(|_|"Unable to run NetBird client".to_owned())?;
+    for _ in 0..150 {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                let result=child.wait_with_output().map_err(|_|"NetBird command could not finish")?;
+                if !result.status.success() {return Err(format!("NetBird {operation} failed. Check Windows permissions or open the NetBird app."));}
+                return Ok(String::from_utf8_lossy(&result.stdout).into_owned());
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(_) => return Err("Unable to read NetBird status".into()),
+        }
+    }
+    let _=child.kill();let _=child.wait();
+    Err(format!("NetBird {operation} timed out; check the NetBird app"))
+}
+
+fn netbird_is_connected(output: &str) -> bool {
+    let has=|key: &str| output.lines().any(|line| {
+        let trimmed=line.trim();
+        trimmed.to_ascii_lowercase().starts_with(key)
+            && trimmed.split_once(':').map(|(_,v)|v.trim().eq_ignore_ascii_case("connected")).unwrap_or(false)
+    });
+    has("management:") && has("signal:")
+}
+
+fn auto_netbird_enabled() -> bool {
+    secret(AUTO_NETBIRD).map(|s|s=="on").unwrap_or(false)
+}
+
+fn connect_netbird_if_needed(ownership: &Mutex<NetbirdOwnership>) -> Result<bool, String> {
+    let exe=netbird_binary()?;
+    let report=netbird_cli(&exe,"status")?;
+    if netbird_is_connected(&report) {return Ok(false);}
+    netbird_cli(&exe,"up")?;
+    if !netbird_is_connected(&netbird_cli(&exe,"status")?) {
+        return Err("NetBird couldn't connect. Sign in using the NetBird app.".into());
+    }
+    ownership.lock().map_err(|_|"NetBird state unavailable")?.connected_by_app=true;
+    Ok(true)
+}
+
+fn disconnect_owned_netbird(ownership: &Mutex<NetbirdOwnership>) {
+    let was_owned=ownership.lock().map(|mut state|{
+        let owned=state.connected_by_app;
+        state.connected_by_app=false;
+        owned
+    }).unwrap_or(false);
+    if !was_owned {return;}
+    if let Ok(exe)=netbird_binary() {
+        let _=netbird_cli(&exe,"down");
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all="camelCase")]
+struct NetbirdAutoStatus { enabled: bool, connected: bool, owned_by_app: bool }
+
+#[tauri::command]
+fn netbird_auto_status(ownership: tauri::State<'_,Mutex<NetbirdOwnership>>) -> NetbirdAutoStatus {
+    let connected=netbird_binary().and_then(|exe|netbird_cli(&exe,"status"))
+        .map(|s|netbird_is_connected(&s)).unwrap_or(false);
+    NetbirdAutoStatus {
+        enabled:auto_netbird_enabled(),connected,
+        owned_by_app:ownership.lock().map(|s|s.connected_by_app).unwrap_or(false),
+    }
+}
+#[tauri::command]
+async fn netbird_set_auto(
+    enabled: bool, ownership: tauri::State<'_,Mutex<NetbirdOwnership>>
+) -> Result<NetbirdAutoStatus,String> {
+    save_secret(AUTO_NETBIRD,if enabled {"on"} else {"off"})?;
+    // The user is explicitly opting in or out: apply the change now too.
+    let state=ownership.inner();
+    if enabled {
+        connect_netbird_if_needed(state)?;
+    } else {
+        disconnect_owned_netbird(state);
+    }
+    Ok(netbird_auto_status(ownership))
+}
+
 // NetBird-only direct control (no Cloudflare, no public RCON).
 // Automatic discovery reads the local NetBird CLI, not GitHub logs or
 // a stale GitHub runner hostname. A private PIN-like shared secret is
@@ -508,14 +620,35 @@ async fn direct_command(kind: String, args: Value) -> Result<Value, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(Mutex::new(NetbirdOwnership::default()))
+        .setup(|app| {
+            if auto_netbird_enabled() {
+                let handle=app.handle().clone();
+                std::thread::spawn(move || {
+                    if let Some(state)=handle.try_state::<Mutex<NetbirdOwnership>>() {
+                        // Best-effort; a VPN failure never stops the desktop app.
+                        let _=connect_netbird_if_needed(state.inner());
+                    }
+                });
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             connect_github,disconnect_github,github_status,github_overview,
             github_workflows,github_runs,github_dispatch,github_cancel,github_jobs,github_job_log,
             github_file,github_save_file,github_download_backup,
             desktop_check_update,desktop_install_update,
             configure_cloudflare,cloudflare_status,cloudflare_command,cloudflare_console,
-            direct_configure,direct_status,direct_command
+            direct_configure,direct_status,direct_command,
+            netbird_auto_status,netbird_set_auto
         ])
-        .run(tauri::generate_context!())
-        .expect("error launching Minecraft Cloud Desktop");
+        .build(tauri::generate_context!())
+        .expect("error building Minecraft Cloud Desktop")
+        .run(|app,event| {
+            if let tauri::RunEvent::Exit=event {
+                if let Some(state)=app.try_state::<Mutex<NetbirdOwnership>>() {
+                    disconnect_owned_netbird(state.inner());
+                }
+            }
+        });
 }
