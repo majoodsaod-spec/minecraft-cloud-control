@@ -1,0 +1,121 @@
+name: Region Lab (isolated runner location test)
+
+# Research only. This workflow never starts or cancels Minecraft.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Separate from continuous-paper-server; reruns only affect this experiment.
+concurrency:
+  group: region-lab-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Region probe ${{ matrix.candidate }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        candidate: [1, 2, 3]
+    timeout-minutes: 5
+    steps:
+      - name: Report approximate egress location
+        shell: bash
+        env:
+          CANDIDATE: ${{ matrix.candidate }}
+        run: |
+          set -euo pipefail
+          # No repository checkout, secrets, Minecraft files, VPN or world backups.
+          # Public IP geolocation is approximate and may identify an egress gateway.
+          curl --fail --silent --show-error --location --retry 2 --max-time 15 \
+            https://ipwho.is/ -o location.json || echo '{}' > location.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          data = json.loads(Path("location.json").read_text())
+          country = str(data.get("country_code") or "").upper()
+          city = str(data.get("city") or "")
+          region = str(data.get("region") or "")
+          ip = str(data.get("ip") or "")
+          ok = data.get("success") is True
+          eu = {"AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE",
+                "GR","HU","IE","IT","LV","LT","LU","MT","NL","PL","PT",
+                "RO","SK","SI","ES","SE"}
+          frankfurt = ok and country == "DE" and "frankfurt" in city.lower()
+          in_eu = ok and country in eu
+          entry = {
+              "candidate": os.environ["CANDIDATE"],
+              "provider": "ipwho.is",
+              "ip": ip if ok else "",
+              "country": country if ok else "",
+              "region": region if ok else "",
+              "city": city if ok else "",
+              "frankfurt": frankfurt,
+              "eu": in_eu,
+              "status": "ok" if ok else "unknown",
+          }
+          Path("result.json").write_text(json.dumps(entry, indent=2))
+          summary = os.environ["GITHUB_STEP_SUMMARY"]
+          with open(summary, "a", encoding="utf-8") as out:
+              out.write(f"### Candidate {entry['candidate']}\n")
+              out.write(f"Approximate location: {city or 'unknown'}, {country or 'unknown'}\n\n")
+              out.write(f"Frankfurt match: {'yes' if frankfurt else 'no'}; EU match: {'yes' if in_eu else 'no'}\n\n")
+              out.write("Location reflects the public egress IP, not guaranteed runner datacenter placement.\n")
+          PY
+      - name: Upload probe result
+        uses: actions/upload-artifact@v4
+        with:
+          name: region-lab-probe-${{ matrix.candidate }}
+          path: result.json
+          retention-days: 7
+          if-no-files-found: error
+
+  summarize:
+    name: Summarize region probes
+    needs: probe
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: region-lab-probe-*
+          path: probes
+          merge-multiple: false
+      - name: Rank observed locations (no server is started)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          results = []
+          for file in sorted(Path("probes").glob("*/result.json")):
+              results.append(json.loads(file.read_text()))
+          results.sort(key=lambda x: (
+              0 if x.get("frankfurt") else 1 if x.get("eu") else 2,
+              int(x["candidate"])
+          ))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("## Region Lab results (approximate IP geolocation)\n\n")
+              out.write("| Candidate | City | Country | Frankfurt | EU |\n")
+              out.write("|---|---|---|---|---|\n")
+              for item in results:
+                  out.write(f"| {item['candidate']} | {item['city'] or 'Unknown'} | "
+                            f"{item['country'] or 'Unknown'} | "
+                            f"{'Yes' if item['frankfurt'] else 'No'} | "
+                            f"{'Yes' if item['eu'] else 'No'} |\n")
+              if results:
+                  best = results[0]
+                  out.write(f"\nBest observed candidate: **{best['candidate']}**. "
+                            "This is a measurement only; that runner has already ended.\n")
+              else:
+                  out.write("\nNo probe results were available.\n")
+              out.write("\nNo Minecraft server, world backup, NetBird connection, "
+                        "GitHub workflow dispatch, or runner cancellation was performed.\n")
+          PY
