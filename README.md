@@ -18,9 +18,9 @@ The **Start server** button requests a new server session, restores the latest v
 
 Stopping is refused when the live bridge is offline; it does not silently cancel the workflow or claim that a backup succeeded. If the runner crashes, is forcibly cancelled or times out, unsaved progress can still be lost. Wait for the **Stopped** phase and a new backup entry before treating the save as successful.
 
-**Save & restart** follows the same safe sequence and starts a replacement session after a verified backup. Automatic restart occurs at a maximum of 5 hours 30 minutes of Paper uptime, or if no player joins for 60 minutes; these timers and online player counts are reported by the runner. Scheduled recovery respects the persistent dashboard **off** state.
+**Save & restart** follows the same safe sequence and starts a replacement session after a verified backup. Automatic restart occurs at a maximum of 5 hours 30 minutes of Paper uptime, or after 60 continuous minutes with no players online; these timers and online player counts are reported by the runner. Scheduled recovery respects the persistent dashboard **off** state.
 
-Only the ten newest `minecraft-world` artifacts are retained after successful backup. This is not a substitute for off-platform backups. GitHub Actions is not a reliable always-on host; queueing and restarts can cause downtime, and world saves are not guaranteed if the host disappears.
+Only the five newest `minecraft-world` artifacts are retained after a verified successful backup. The cleanup workflow first confirms the newest archive is visible via GitHub's API, and skips deletion if it cannot verify the new backup. This is not a substitute for off-platform backups. GitHub Actions is not a reliable always-on host; queueing and restarts can cause downtime, and world saves are not guaranteed if the host disappears.
 
 ## Dashboard features
 
@@ -151,3 +151,10 @@ The Files page is a full server-backed explorer, not a free-text path editor. Wh
 - File operations require the server to be online and the Worker dashboard to be deployed with the matching backend version
 
 The server protects plugin JARs by routing them through the existing Plugins page rather than arbitrary live uploads. Large binary/world-file transfer and recursive folder deletion are intentionally not included in the live command bridge; use verified backups for world data.
+
+
+## GitHub Actions storage and maintenance
+
+World snapshots are produced only after a graceful Paper shutdown and checked with SHA-256. The **five newest** valid `minecraft-world` GitHub Actions artifacts are kept, with a maximum artifact lifetime of **90 days**. Older backups are cleaned up after the newly uploaded backup is listed by GitHub; cleanup cannot run when backup/upload fails. The run summary reports how much artifact storage was reclaimed. Backups can still expire if the server is stopped for a long time, so download important worlds off GitHub regularly.
+
+GitHub automatically disables scheduled workflows in a public repository after 60 days with no repository activity. This project intentionally does **not** generate dummy commits merely to evade inactivity checks. Use legitimate code/dependency maintenance and check GitHub's Actions page if scheduled recovery is disabled. GitHub-hosted runners should not be relied on as an always-on game-server host; these storage optimizations do not change GitHub's platform restrictions.
