@@ -101,12 +101,43 @@ jobs:
           else
             echo "::warning::PLAYIT_SECRET_KEY is missing; remote players cannot connect to the GitHub runner."
           fi
+      - name: Connect private NetBird management network
+        if: steps.power.outputs.enabled == 'true' && steps.select.outputs.skip != 'true'
+        shell: bash
+        env:
+          NETBIRD_SETUP_KEY: ${{ secrets.NETBIRD_SETUP_KEY }}
+          DIRECT_TOKEN: ${{ secrets.MINECRAFT_DIRECT_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$NETBIRD_SETUP_KEY" || -z "$DIRECT_TOKEN" ]]; then
+            echo "::warning::Direct Windows console is disabled until NETBIRD_SETUP_KEY and MINECRAFT_DIRECT_TOKEN secrets are configured."
+            exit 0
+          fi
+          # A failed optional VPN must not prevent Paper startup or world backups.
+          if ! (curl -fsSL --max-time 40 https://pkgs.netbird.io/install.sh -o "$RUNNER_TEMP/netbird-install.sh" &&
+                sudo bash "$RUNNER_TEMP/netbird-install.sh" >/dev/null); then
+            echo "::warning::NetBird installation unavailable; starting Paper normally."
+            exit 0
+          fi
+          if ! sudo netbird up --setup-key "$NETBIRD_SETUP_KEY" --hostname "minecraft-paper-$GITHUB_RUN_ID" >/dev/null 2>&1; then
+            echo "::warning::NetBird connection failed; starting Paper normally."
+            exit 0
+          fi
+          private_ip="$(sudo netbird status --ipv4 2>/dev/null | tr -d '\r\n' | cut -d/ -f1)"
+          if ! [[ "$private_ip" =~ ^100\\.([6-9][0-9]|1[0-1][0-9]|12[0-7])\\.[0-9]+\\.[0-9]+$ ]]; then
+            # Strict IP validation happens again in Python's direct control.
+            echo "::warning::NetBird private IP not ready; live direct control unavailable."
+            exit 0
+          fi
+          echo "NETBIRD_IP=$private_ip" >> "$GITHUB_ENV"
+          echo "NetBird private Paper peer registered: minecraft-paper-$GITHUB_RUN_ID"
       - name: Run Paper until restart condition
         if: steps.power.outputs.enabled == 'true' && steps.select.outputs.skip != 'true'
         shell: bash
         env:
           CLOUDFLARE_CONTROL_URL: ${{ secrets.CLOUDFLARE_CONTROL_URL }}
           CLOUDFLARE_BRIDGE_TOKEN: ${{ secrets.CLOUDFLARE_BRIDGE_TOKEN }}
+          MINECRAFT_DIRECT_TOKEN: ${{ secrets.MINECRAFT_DIRECT_TOKEN }}
           GEYSER_PLAYIT_CONFIG: ${{ secrets.GEYSER_PLAYIT_CONFIG }}
           CHUNKY_PREGEN_RADIUS: ${{ vars.CHUNKY_PREGEN_RADIUS }}
         run: python server/continuous_paper.py
