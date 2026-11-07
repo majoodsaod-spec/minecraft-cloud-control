@@ -430,6 +430,25 @@ fn netbird_cli(exe: &std::path::Path, operation: &str) -> Result<String, String>
     Err(format!("NetBird {operation} timed out; check the NetBird app"))
 }
 
+#[cfg(test)]
+mod netbird_lifecycle_tests {
+    use super::*;
+    #[test]
+    fn only_explicitly_connected_status_counts() {
+        assert!(netbird_is_connected("Management: Connected\nSignal: Connected\n"));
+        assert!(!netbird_is_connected("Management: Disconnected\nSignal: Connected\n"));
+        assert!(!netbird_is_connected("Management: Connected\nSignal: Disconnected\n"));
+        assert!(!netbird_is_connected("Peers count: 1/2 Connected\n"));
+    }
+    #[test]
+    fn manual_overlay_address_cannot_point_to_public_internet() {
+        assert!(private_overlay_ip("100.93.164.78"));
+        assert!(!private_overlay_ip("127.0.0.1"));
+        assert!(!private_overlay_ip("8.8.8.8"));
+        assert!(!private_overlay_ip("192.168.1.20"));
+    }
+}
+
 fn netbird_is_connected(output: &str) -> bool {
     let has=|key: &str| output.lines().any(|line| {
         let trimmed=line.trim();
