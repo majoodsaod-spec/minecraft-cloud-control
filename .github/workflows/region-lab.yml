@@ -1,13 +1,13 @@
 name: Region Lab (isolated runner location test)
 
-# Research only. This workflow never starts or cancels Minecraft.
+# Manual research only: never starts, cancels, or changes Minecraft.
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Separate from continuous-paper-server; reruns only affect this experiment.
+# Deliberately separate from the live Paper workflow's concurrency group.
 concurrency:
   group: region-lab-${{ github.ref }}
   cancel-in-progress: false
@@ -21,51 +21,137 @@ jobs:
       max-parallel: 3
       matrix:
         candidate: [1, 2, 3]
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
-      - name: Report approximate egress location
+      - name: Compare geolocation, cloud metadata and latency
         shell: bash
         env:
           CANDIDATE: ${{ matrix.candidate }}
         run: |
           set -euo pipefail
-          # No repository checkout, secrets, Minecraft files, VPN or world backups.
-          # Public IP geolocation is approximate and may identify an egress gateway.
-          curl --fail --silent --show-error --location --retry 2 --max-time 15 \
-            https://ipwho.is/ -o location.json || echo '{}' > location.json
+          # No checkout, tokens, secrets, deployment, Minecraft, or VPN.
           python3 - <<'PY'
-          import json, os
+          import json, os, subprocess, statistics
           from pathlib import Path
 
-          data = json.loads(Path("location.json").read_text())
-          country = str(data.get("country_code") or "").upper()
-          city = str(data.get("city") or "")
-          region = str(data.get("region") or "")
-          ip = str(data.get("ip") or "")
-          ok = data.get("success") is True
-          eu = {"AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE",
-                "GR","HU","IE","IT","LV","LT","LU","MT","NL","PL","PT",
-                "RO","SK","SI","ES","SE"}
-          frankfurt = ok and country == "DE" and "frankfurt" in city.lower()
-          in_eu = ok and country in eu
-          entry = {
-              "candidate": os.environ["CANDIDATE"],
-              "provider": "ipwho.is",
-              "ip": ip if ok else "",
-              "country": country if ok else "",
-              "region": region if ok else "",
-              "city": city if ok else "",
-              "frankfurt": frankfurt,
-              "eu": in_eu,
-              "status": "ok" if ok else "unknown",
+          def curl(url, *, method=None, headers=(), data=None, timeout=7, proxy_bypass=False):
+              cmd = ["curl", "-sS", "-f", "--max-time", str(timeout)]
+              if proxy_bypass:
+                  cmd += ["--noproxy", "*"]
+              if method:
+                  cmd += ["-X", method]
+              for h in headers:
+                  cmd += ["-H", h]
+              if data is not None:
+                  cmd += ["--data", data]
+              cmd.append(url)
+              try:
+                  return subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=timeout + 2).decode().strip()
+              except (subprocess.CalledProcessError, subprocess.TimeoutExpired, UnicodeError):
+                  return ""
+
+          def remote_json(url):
+              try:
+                  return json.loads(curl(url, timeout=9))
+              except (ValueError, TypeError):
+                  return {}
+
+          a = remote_json("https://ipwho.is/")
+          b = remote_json("https://ipapi.co/json/")
+          def normalize(data, source):
+              if source == "ipwho.is":
+                  valid = data.get("success") is True
+                  network = data.get("connection") or {}
+                  return {"source": source, "ip": str(data.get("ip") or "") if valid else "",
+                          "country": str(data.get("country_code") or "").upper() if valid else "",
+                          "city": str(data.get("city") or "") if valid else "",
+                          "region": str(data.get("region") or "") if valid else "",
+                          "asn": str(network.get("asn") or "") if valid else "",
+                          "org": str(network.get("org") or network.get("isp") or "") if valid else "",
+                          "ok": valid}
+              valid = bool(data.get("ip")) and not data.get("error")
+              return {"source": source, "ip": str(data.get("ip") or "") if valid else "",
+                      "country": str(data.get("country_code") or "").upper() if valid else "",
+                      "city": str(data.get("city") or "") if valid else "",
+                      "region": str(data.get("region") or "") if valid else "",
+                      "asn": str(data.get("asn") or "") if valid else "",
+                      "org": str(data.get("org") or "") if valid else "",
+                      "ok": valid}
+
+          locations = [normalize(a, "ipwho.is"), normalize(b, "ipapi.co")]
+          eu_countries = {"AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE",
+                          "GR","HU","IE","IT","LV","LT","LU","MT","NL","PL","PT",
+                          "RO","SK","SI","ES","SE"}
+          valid = [x for x in locations if x["ok"]]
+          # Only call a country confirmed when both geolocation providers agree.
+          agreed = len(valid) == 2 and valid[0]["country"] == valid[1]["country"] and bool(valid[0]["country"])
+          country = valid[0]["country"] if agreed else ""
+          frankfurt = agreed and country == "DE" and all("frankfurt" in x["city"].lower() for x in valid)
+          in_eu = agreed and country in eu_countries
+
+          cloud = {"provider": "unknown", "region": ""}
+          # AWS instance metadata is local only; IMDSv2 token is not logged.
+          token = curl("http://169.254.169.254/latest/api/token", method="PUT",
+                       headers=["X-aws-ec2-metadata-token-ttl-seconds: 30"],
+                       timeout=2, proxy_bypass=True)
+          if token:
+              identity = curl("http://169.254.169.254/latest/dynamic/instance-identity/document",
+                              headers=["X-aws-ec2-metadata-token: " + token],
+                              timeout=2, proxy_bypass=True)
+              try:
+                  region = json.loads(identity).get("region", "")
+                  if region:
+                      cloud = {"provider": "AWS metadata", "region": str(region)}
+              except ValueError:
+                  pass
+          if not cloud["region"]:
+              azure = curl("http://169.254.169.254/metadata/instance/compute?api-version=2021-02-01",
+                           headers=["Metadata: true"], timeout=2, proxy_bypass=True)
+              try:
+                  region = json.loads(azure).get("location", "")
+                  if region:
+                      cloud = {"provider": "Azure metadata", "region": str(region)}
+              except ValueError:
+                  pass
+
+          # HTTPS connect RTT is affected by routing, DNS and endpoints. Not a game ping.
+          endpoints = {
+              "Frankfurt AWS": "https://ec2.eu-central-1.amazonaws.com/",
+              "Ireland AWS": "https://ec2.eu-west-1.amazonaws.com/",
+              "US Virginia AWS": "https://ec2.us-east-1.amazonaws.com/",
+              "US Oregon AWS": "https://ec2.us-west-2.amazonaws.com/",
           }
-          Path("result.json").write_text(json.dumps(entry, indent=2))
-          summary = os.environ["GITHUB_STEP_SUMMARY"]
-          with open(summary, "a", encoding="utf-8") as out:
-              out.write(f"### Candidate {entry['candidate']}\n")
-              out.write(f"Approximate location: {city or 'unknown'}, {country or 'unknown'}\n\n")
-              out.write(f"Frankfurt match: {'yes' if frankfurt else 'no'}; EU match: {'yes' if in_eu else 'no'}\n\n")
-              out.write("Location reflects the public egress IP, not guaranteed runner datacenter placement.\n")
+          latencies = {}
+          for label, url in endpoints.items():
+              values = []
+              for _ in range(2):
+                  cmd = ["curl", "-sS", "-o", "/dev/null", "--connect-timeout", "4",
+                         "--max-time", "6", "-w", "%{time_connect}", url]
+                  try:
+                      p = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+                      t = float(p.stdout.strip())
+                      if t > 0:
+                          values.append(round(t * 1000))
+                  except (ValueError, subprocess.TimeoutExpired):
+                      pass
+              latencies[label] = round(statistics.median(values)) if values else None
+
+          result = {"candidate": os.environ["CANDIDATE"], "locations": locations,
+                    "agreed_country": country, "frankfurt": frankfurt, "eu": in_eu,
+                    "cloud_metadata": cloud, "tcp_connect_ms": latencies}
+          Path("result.json").write_text(json.dumps(result, indent=2) + "\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write(f"### Candidate {result['candidate']}\n\n")
+              out.write("| Source | Egress IP | City | Country | ASN / Network |\n|---|---|---|---|---|\n")
+              for x in locations:
+                  out.write(f"| {x['source']} | {x['ip'] or '-'} | {x['city'] or '-'} | {x['country'] or '-'} | {x['asn']} {x['org']} |\n")
+              out.write(f"\nCountry agreement: **{country or 'unknown / disagreement'}**. "
+                        f"Frankfurt: **{'yes' if frankfurt else 'no'}**. EU: **{'yes' if in_eu else 'no'}**.\n\n")
+              out.write(f"Cloud metadata: **{cloud['provider']}** / **{cloud['region'] or 'unavailable'}**.\n\n")
+              out.write("TCP connection timing (ms; not Minecraft ping):\n\n")
+              for name, value in latencies.items():
+                  out.write(f"- {name}: {value if value is not None else 'unavailable'}\n")
+              out.write("\nIP city is approximate; metadata may be blocked; latency is indicative only.\n")
           PY
       - name: Upload probe result
         uses: actions/upload-artifact@v4
@@ -83,39 +169,40 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           pattern: region-lab-probe-*
           path: probes
           merge-multiple: false
-      - name: Rank observed locations (no server is started)
+      - name: Compare observed results (never launch a server)
         shell: bash
         run: |
           python3 - <<'PY'
           import json, os
           from pathlib import Path
-
           results = []
-          for file in sorted(Path("probes").glob("*/result.json")):
-              results.append(json.loads(file.read_text()))
-          results.sort(key=lambda x: (
-              0 if x.get("frankfurt") else 1 if x.get("eu") else 2,
-              int(x["candidate"])
-          ))
+          for f in sorted(Path("probes").glob("*/result.json")):
+              try:
+                  results.append(json.loads(f.read_text()))
+              except (ValueError, OSError):
+                  continue
+          results.sort(key=lambda x: (0 if x.get("frankfurt") else 1 if x.get("eu") else 2,
+                                     int(x["candidate"])))
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
-              out.write("## Region Lab results (approximate IP geolocation)\n\n")
-              out.write("| Candidate | City | Country | Frankfurt | EU |\n")
-              out.write("|---|---|---|---|---|\n")
-              for item in results:
-                  out.write(f"| {item['candidate']} | {item['city'] or 'Unknown'} | "
-                            f"{item['country'] or 'Unknown'} | "
-                            f"{'Yes' if item['frankfurt'] else 'No'} | "
-                            f"{'Yes' if item['eu'] else 'No'} |\n")
-              if results:
-                  best = results[0]
-                  out.write(f"\nBest observed candidate: **{best['candidate']}**. "
-                            "This is a measurement only; that runner has already ended.\n")
-              else:
-                  out.write("\nNo probe results were available.\n")
-              out.write("\nNo Minecraft server, world backup, NetBird connection, "
-                        "GitHub workflow dispatch, or runner cancellation was performed.\n")
+              out.write("## Region Lab: independent egress, metadata and latency checks\n\n")
+              out.write("| Candidate | Geo agreement | Frankfurt | EU | Cloud region | Frankfurt TCP ms | US Virginia TCP ms |\n")
+              out.write("|---|---|---|---|---|---:|---:|\n")
+              for x in results:
+                  lat = x.get("tcp_connect_ms", {})
+                  cloud = x.get("cloud_metadata", {})
+                  out.write(f"| {x['candidate']} | {x.get('agreed_country') or 'unknown'} | "
+                            f"{'Yes' if x.get('frankfurt') else 'No'} | "
+                            f"{'Yes' if x.get('eu') else 'No'} | "
+                            f"{cloud.get('region') or 'not exposed'} | "
+                            f"{lat.get('Frankfurt AWS') if lat.get('Frankfurt AWS') is not None else '-'} | "
+                            f"{lat.get('US Virginia AWS') if lat.get('US Virginia AWS') is not None else '-'} |\n")
+              out.write(f"\nCompleted probes: **{len(results)}/3**. "
+                        "These runner jobs are finished; none was retained or used for Minecraft.\n\n")
+              out.write("No Minecraft workflows, world backups, NetBird peers, or secrets were accessed. "
+                        "Geolocation is of egress IP; TCP latency and metadata do not prove physical location.\n")
           PY
