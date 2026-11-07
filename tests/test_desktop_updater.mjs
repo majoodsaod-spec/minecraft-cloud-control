@@ -93,3 +93,18 @@ test("Direct Paper freshness uses local request time, not unsynchronized server 
   assert.match(ui,/Date\.now\(\)-state\.directFetchedAt<15000/);
   assert.doesNotMatch(ui,/Date\.now\(\)-\(d\.updatedAt\|\|0\)<15000/);
 });
+
+
+test("NetBird discovers peers from the documented structured JSON status",()=>{
+  assert.match(rust,/fn parse_peer_json\(report: &str\)/);
+  assert.match(rust,/get\("peers"\)\?\.get\("details"\)/);
+  assert.match(rust,/get\("fqdn"\)/);
+  assert.match(rust,/get\("netbirdIp"\)/);
+  assert.match(rust,/get\("status"\)/);
+  assert.match(rust,/netbird_cli_args\(&binary,&\["status","--json"\]\)/);
+});
+test("NetBird connection ownership persists while the daemon completes startup",()=>{
+  assert.match(rust,/state\.connected_by_app=true;\s*for _ in 0\.\.12/);
+  assert.match(rust,/let mut state=ownership\.lock\(\)/);
+  assert.match(rust,/fn disconnect_owned_netbird/);
+});
