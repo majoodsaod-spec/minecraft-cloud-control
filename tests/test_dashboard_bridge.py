@@ -40,6 +40,8 @@ class BridgeSafetyTests(unittest.TestCase):
         self.assertEqual(self.sent, [])
 
     def test_file_write_and_read(self):
+        # The live file manager deliberately requires existing parent folders.
+        (self.data / "config").mkdir()
         self.bridge._execute({"type": "files-write", "args": {
             "path": "config/settings.yml", "content": "enabled: true\n"
         }})
