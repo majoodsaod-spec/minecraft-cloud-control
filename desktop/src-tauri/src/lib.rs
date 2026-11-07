@@ -383,6 +383,128 @@ async fn cloudflare_console(command:String)->Result<Value,String> {
     if !response.status().is_success(){return Err(format!("Live console HTTP {}",response.status().as_u16()));}
     response.json().await.map_err(|_|"Invalid console reply".into())
 }
+// NetBird-only direct control (no Cloudflare, no public RCON).
+// Automatic discovery reads the local NetBird CLI, not GitHub logs or
+// a stale GitHub runner hostname. A private PIN-like shared secret is
+// stored only in Windows Credential Manager.
+const DIRECT_SECRET: &str = "netbird-direct-token";
+const DIRECT_PEER: &str = "netbird-direct-peer";
+
+fn private_overlay_ip(value: &str) -> bool {
+    let Ok(ip)=value.parse::<std::net::Ipv4Addr>() else { return false; };
+    let parts=ip.octets();
+    parts[0]==100 && (64..=127).contains(&parts[1])
+}
+
+fn find_netbird_peer() -> Result<String, String> {
+    let mut binaries=vec![std::path::PathBuf::from("netbird")];
+    for name in [
+        r"C:\Program Files\NetBird\netbird.exe",
+        r"C:\Program Files\NetBird\bin\netbird.exe",
+        r"C:\Program Files (x86)\NetBird\netbird.exe"
+    ] {
+        binaries.push(name.into());
+    }
+    let mut output=None;
+    for binary in binaries {
+        if let Ok(result)=std::process::Command::new(&binary)
+            .args(["status","--table","--filter-by-names","minecraft-paper"])
+            .output() {
+            if result.status.success() {
+                output=Some(String::from_utf8_lossy(&result.stdout).into_owned());
+                break;
+            }
+        }
+    }
+    let report=output.ok_or("NetBird CLI unavailable. Ensure NetBird is installed and connected.")?;
+    let mut candidates=Vec::new();
+    for line in report.lines() {
+        let columns=line.split_whitespace().collect::<Vec<_>>();
+        if columns.len()<3 {continue;}
+        let peer=columns[0].to_ascii_lowercase();
+        if !peer.starts_with("minecraft-paper-") {continue;}
+        let ip=columns[1];
+        if !private_overlay_ip(ip) {continue;}
+        if !columns[2].eq_ignore_ascii_case("connected") {continue;}
+        let id=peer.trim_start_matches("minecraft-paper-")
+            .parse::<u64>().unwrap_or(0);
+        if id==0 {continue;}
+        candidates.push((id,ip.to_owned()));
+    }
+    candidates.sort_unstable_by_key(|x|x.0);
+    candidates.pop().map(|x|x.1).ok_or(
+        "No connected minecraft-paper runner found in NetBird. Check that the new GitHub Actions session joined the same NetBird network.".to_owned()
+    )
+}
+
+fn direct_peer_ip() -> Result<String, String> {
+    let manual=secret(DIRECT_PEER).unwrap_or_default();
+    if !manual.is_empty() {
+        if !private_overlay_ip(&manual) {
+            return Err("Configured peer IP is not a private NetBird address".into());
+        }
+        return Ok(manual);
+    }
+    find_netbird_peer()
+}
+
+fn direct_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+      .no_proxy()
+      .timeout(std::time::Duration::from_secs(6))
+      .build().map_err(|_|"Couldn't create private connection".to_owned())
+}
+async fn direct_request(kind: &str, command: Option<Value>) -> Result<Value, String> {
+    let token=secret(DIRECT_SECRET)?;
+    if token.len()<24 {return Err("Direct control token must be at least 24 characters".into());}
+    let ip=direct_peer_ip()?;
+    let url=format!("http://{ip}:8765/api/{kind}");
+    let client=direct_client()?;
+    let req=match command {
+        Some(body)=>client.post(url).json(&body),
+        None=>client.get(url)
+    };
+    let response=req.bearer_auth(token).send().await.map_err(|_|{
+        "Can't reach Paper over NetBird. Check that both peers are connected and the runner has MINECRAFT_DIRECT_TOKEN.".to_owned()
+    })?;
+    let code=response.status();
+    let body=response.json::<Value>().await.map_err(|_|"Invalid private Paper response".to_owned())?;
+    if !code.is_success(){
+        return Err(format!("Direct Paper HTTP {}: {}",code.as_u16(),
+            body["error"].as_str().unwrap_or("Unknown server error").chars().take(160).collect::<String>()));
+    }
+    Ok(body)
+}
+#[tauri::command]
+fn direct_configure(token: String, peer_ip: String) -> Result<(), String> {
+    let trimmed=token.trim();
+    if trimmed.len()<24 || trimmed.len()>512 {
+        return Err("Enter a strong direct-control token (at least 24 characters)".into());
+    }
+    let peer=peer_ip.trim();
+    if !peer.is_empty() && !private_overlay_ip(peer) {
+        return Err("Manual server IP must be a NetBird address in 100.64.0.0/10".into());
+    }
+    save_secret(DIRECT_SECRET,trimmed)?;
+    if peer.is_empty(){let _=remove_secret(DIRECT_PEER);}
+    else {save_secret(DIRECT_PEER,peer)?;}
+    Ok(())
+}
+#[tauri::command]
+async fn direct_status() -> Result<Value, String> { direct_request("status",None).await }
+#[tauri::command]
+async fn direct_command(kind: String, args: Value) -> Result<Value, String> {
+    const ALLOWED: &[&str]=&[
+        "console","save","restart","shutdown","kick","ban","pardon",
+        "whitelist-add","whitelist-remove","whitelist-on","whitelist-off",
+        "op","deop","plugins-list","files-list","files-tree","files-read",
+        "files-write","files-delete","files-mkdir","files-rename",
+        "files-upload","files-download",
+    ];
+    if !ALLOWED.contains(&kind.as_str()) { return Err("Unsupported Paper command".into());}
+    if !args.is_object(){return Err("Invalid command arguments".into());}
+    direct_request("command",Some(json!({"type":kind,"args":args}))).await
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -391,7 +513,8 @@ pub fn run() {
             github_workflows,github_runs,github_dispatch,github_cancel,github_jobs,github_job_log,
             github_file,github_save_file,github_download_backup,
             desktop_check_update,desktop_install_update,
-            configure_cloudflare,cloudflare_status,cloudflare_command,cloudflare_console
+            configure_cloudflare,cloudflare_status,cloudflare_command,cloudflare_console,
+            direct_configure,direct_status,direct_command
         ])
         .run(tauri::generate_context!())
         .expect("error launching Minecraft Cloud Desktop");
