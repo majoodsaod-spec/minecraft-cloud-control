@@ -178,3 +178,25 @@ h1,h2,h3,.server-title,.page-header h1,.hero-title{color:#23343b;letter-spacing:
     transition-duration:.01ms!important;scroll-behavior:auto!important;
   }
 }
+
+/* Direct GitHub in-app update affordance */
+.quick-update-control{
+  display:inline-flex;align-items:center;gap:8px;
+  white-space:nowrap;min-height:34px!important;
+  border-radius:11px!important;padding:7px 12px!important;
+}
+.update-indicator:not([hidden]){
+  display:inline-block;width:7px;height:7px;border-radius:50%;
+  background:#25ae79;box-shadow:0 0 0 3px rgba(35,170,115,.14);
+  animation:mc-status 2.5s ease-out infinite;
+}
+.update-indicator[hidden]{display:none!important}
+.quick-update-control:has(.update-indicator:not([hidden])){
+  background:#e7f7ed!important;color:#117452!important;
+  border-color:#c4e8d4!important;
+}
+@media(max-width:750px){
+  .quick-update-control{font-size:0!important;width:37px;min-width:37px;justify-content:center;padding:0!important}
+  .quick-update-control::after{content:"↻";font-size:17px}
+  .quick-update-control .update-indicator:not([hidden]){position:absolute;margin:-28px 0 0 24px}
+}
