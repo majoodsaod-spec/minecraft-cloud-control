@@ -306,6 +306,12 @@ def run(jar: Path) -> None:
         if graceful and (DATA / "world" / "level.dat").exists():
             bridge.phase("backing_up","Creating and verifying world backup")
             snapshot()
+            # Direct NetBird shutdown must stay OFF even if Cloudflare is
+            # unavailable or still reports desired=on. This flag is consumed
+            # by the workflow only after successful backup validation.
+            if bridge_shutdown.is_set():
+                (OUTPUT / "stop-requested").write_text("true\\n")
+                print("Safe stop recorded; successor workflow will not be dispatched", flush=True)
         else:
             raise RuntimeError("No verified clean shutdown; refusing backup/automatic handoff")
 
