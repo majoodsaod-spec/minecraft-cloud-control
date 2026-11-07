@@ -598,7 +598,7 @@ fn direct_client() -> Result<reqwest::Client, String> {
       .build().map_err(|_|"Couldn't create private connection".to_owned())
 }
 async fn direct_request(kind: &str, command: Option<Value>) -> Result<Value, String> {
-    let token=secret(DIRECT_SECRET)?;
+    let token=secret(DIRECT_SECRET).map_err(|_|"Direct Paper needs a separate secret. Set MINECRAFT_DIRECT_TOKEN in GitHub Actions Secrets, then enter the exact same value under Connections → Direct Paper.".to_owned())?;
     if token.len()<24 {return Err("Direct control token must be at least 24 characters".into());}
     let ip=direct_peer_ip()?;
     let url=format!("http://{ip}:8765/api/{kind}");
