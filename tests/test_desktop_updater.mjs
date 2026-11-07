@@ -74,3 +74,15 @@ test("Direct Paper accepts 8-character secrets in both Rust and Windows UI",()=>
   assert.doesNotMatch(rust,/Direct control token must be at least 24 characters/);
   assert.doesNotMatch(ui,/token\.length<24/);
 });
+
+test("NetBird lazy peers are dialed even before a handshake exists",()=>{
+  assert.match(rust,/matches!\(status\.as_str\(\),"connected"\|"connecting"\|"idle"\)/);
+  assert.match(rust,/fn discovers_runner_from_netbird_table_and_details/);
+  assert.match(rust,/Status: Idle/);
+  assert.match(rust,/from_secs\(12\)/);
+});
+test("NetBird auto-connection is refreshed and does not pile up status probes",()=>{
+  assert.match(ui,/loadDirect\(true\),loadNetbirdAuto\(\)/);
+  assert.match(ui,/pendingDirectStatus/);
+  assert.match(ui,/if\(pendingDirectStatus\)return pendingDirectStatus/);
+});
