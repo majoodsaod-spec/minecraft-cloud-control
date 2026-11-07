@@ -391,6 +391,17 @@ const AUTO_NETBIRD: &str = "auto-netbird-on-open";
 #[derive(Default)]
 struct NetbirdOwnership { connected_by_app: bool }
 
+// The GUI must never pop visible CLI windows during background polling.
+#[cfg(windows)]
+fn hide_netbird_console(command: &mut std::process::Command) -> &mut std::process::Command {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    command
+}
+#[cfg(not(windows))]
+fn hide_netbird_console(command: &mut std::process::Command) -> &mut std::process::Command {
+    command
+}
 fn netbird_binary() -> Result<std::path::PathBuf, String> {
     let candidates=[
         std::path::PathBuf::from(r"C:\Program Files\NetBird\netbird.exe"),
@@ -399,7 +410,7 @@ fn netbird_binary() -> Result<std::path::PathBuf, String> {
         std::path::PathBuf::from("netbird"),
     ];
     for path in candidates {
-        if std::process::Command::new(&path).arg("version")
+        if hide_netbird_console(std::process::Command::new(&path).arg("version"))
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status().map(|s|s.success()).unwrap_or(false) {
@@ -410,7 +421,7 @@ fn netbird_binary() -> Result<std::path::PathBuf, String> {
 }
 
 fn netbird_cli(exe: &std::path::Path, operation: &str) -> Result<String, String> {
-    let mut child=std::process::Command::new(exe).arg(operation)
+    let mut child=hide_netbird_console(std::process::Command::new(exe).arg(operation))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -436,6 +447,7 @@ mod netbird_lifecycle_tests {
     #[test]
     fn only_explicitly_connected_status_counts() {
         assert!(netbird_is_connected("Management: Connected\nSignal: Connected\n"));
+        assert!(netbird_is_connected("Management: Connected to https://api.netbird.io:443\nSignal: Connected to https://signal.netbird.io:443\n"));
         assert!(!netbird_is_connected("Management: Disconnected\nSignal: Connected\n"));
         assert!(!netbird_is_connected("Management: Connected\nSignal: Disconnected\n"));
         assert!(!netbird_is_connected("Peers count: 1/2 Connected\n"));
@@ -453,7 +465,7 @@ fn netbird_is_connected(output: &str) -> bool {
     let has=|key: &str| output.lines().any(|line| {
         let trimmed=line.trim();
         trimmed.to_ascii_lowercase().starts_with(key)
-            && trimmed.split_once(':').map(|(_,v)|v.trim().eq_ignore_ascii_case("connected")).unwrap_or(false)
+            && trimmed.split_once(':').map(|(_,v)|v.trim().to_ascii_lowercase().starts_with("connected")).unwrap_or(false)
     });
     has("management:") && has("signal:")
 }
@@ -538,8 +550,8 @@ fn find_netbird_peer() -> Result<String, String> {
     }
     let mut output=None;
     for binary in binaries {
-        if let Ok(result)=std::process::Command::new(&binary)
-            .args(["status","--table"])
+        if let Ok(result)=hide_netbird_console(std::process::Command::new(&binary)
+            .args(["status","--table"]))
             .output() {
             if result.status.success() {
                 output=Some(String::from_utf8_lossy(&result.stdout).into_owned());
