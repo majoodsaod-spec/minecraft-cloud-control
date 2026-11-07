@@ -25,6 +25,7 @@ jobs:
     timeout-minutes: 345
     outputs:
       backed_up: ${{ steps.backedup.outputs.ready }}
+      stop_requested: ${{ steps.paper.outputs.stop_requested }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
@@ -132,6 +133,7 @@ jobs:
           echo "NETBIRD_IP=$private_ip" >> "$GITHUB_ENV"
           echo "NetBird private Paper peer registered: minecraft-paper-$GITHUB_RUN_ID"
       - name: Run Paper until restart condition
+        id: paper
         if: steps.power.outputs.enabled == 'true' && steps.select.outputs.skip != 'true'
         shell: bash
         env:
@@ -140,7 +142,11 @@ jobs:
           MINECRAFT_DIRECT_TOKEN: ${{ secrets.MINECRAFT_DIRECT_TOKEN }}
           GEYSER_PLAYIT_CONFIG: ${{ secrets.GEYSER_PLAYIT_CONFIG }}
           CHUNKY_PREGEN_RADIUS: ${{ vars.CHUNKY_PREGEN_RADIUS }}
-        run: python server/continuous_paper.py
+        run: |
+          python server/continuous_paper.py
+          if [[ -f cycle-output/stop-requested ]]; then
+            echo "stop_requested=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Upload verified world backup
         id: backup
         if: success() && steps.power.outputs.enabled == 'true' && steps.select.outputs.skip != 'true'
@@ -173,7 +179,7 @@ jobs:
 
   next_session:
     needs: minecraft
-    if: needs.minecraft.result == 'success' && needs.minecraft.outputs.backed_up == 'true'
+    if: needs.minecraft.result == 'success' && needs.minecraft.outputs.backed_up == 'true' && needs.minecraft.outputs.stop_requested != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
