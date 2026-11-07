@@ -79,7 +79,7 @@ function drawConsole(){
   const lines=online&&logs.length?logs.map(line=>{
     const cls=/\b(ERROR|Exception|failed)\b/i.test(line)?"error":/\b(INFO|Done|joined)\b/i.test(line)?"info":"";
     return `<div class="${cls}">${esc(line)}</div>`;
-  }).join(""):githubFallback&&githubLogs?`<span class="dim">GitHub Actions logs (may be delayed; read-only)</span>\\n${esc(githubLogs)}`:`<span class="dim">${esc(state.githubLogError||"No Paper live console. GitHub job logs are available below when GitHub publishes them.")}</span>`;
+  }).join(""):githubFallback&&githubLogs?`<span class="dim">GitHub Actions logs (may be delayed; read-only)</span>\n${esc(githubLogs)}`:`<span class="dim">${esc(state.githubLogError||"No Paper live console. GitHub job logs are available below when GitHub publishes them.")}</span>`;
   $("#content").innerHTML=header("LIVE MANAGEMENT","Console","Your Paper server's latest output, securely relayed when the live bridge is available.",btn("↻ Refresh","refresh","flat"))
    +(online?notice("● Secure bridge online — console commands are sent to the active Paper process.",true):notice(githubFallback?"GitHub read-only log fallback is active. These logs may be delayed or unavailable during an active job. GitHub does not support sending Paper console commands.":"The live bridge is offline. Connect GitHub to inspect workflow logs. Do not force-cancel a running Minecraft job."))
    +panel(online?"Paper live console":"GitHub Actions · read-only job logs",`<div class="header-actions" style="justify-content:flex-start;margin-bottom:12px"><button class="btn small flat" data-action="server-logs" ${githubFallback?"":"disabled"}>↻ Load GitHub logs</button><span class="field-tip">${esc(state.githubLogInfo||"GitHub job output is not a direct Paper connection")}</span></div><div class="console" id="terminal">${lines}</div><form id="consoleForm" class="console-form"><input id="commandText" placeholder="Enter a Paper console command…" autocomplete="off" aria-label="Paper console command" ${online?"":"disabled"}><button class="btn primary" ${online?"":"disabled"}>Send ↗</button></form>`);
@@ -160,7 +160,7 @@ async function loadGithubServerLog(quiet=true){
     const jobs=await run("github_jobs",{runId:Number(target.id)},{quiet});
     const list=Array.isArray(jobs)?jobs:[];
     const job=list.find(j=>j.status==="in_progress")||list.find(j=>j.conclusion==="failure")||list.find(j=>j.conclusion==="success")||list[0];
-    if(!job){state.githubLogError="GitHub has not created a job for this run yet.";return;}
+    if(!job){state.githubLogError="GitHub has not created a job for this run yet.";state.logFetchedAt=Date.now();return;}
     state.githubLogInfo="Run #"+target.run_number+" · "+(job.name||"job")+" · "+(job.conclusion||job.status);
     const content=await run("github_job_log",{jobId:Number(job.id)},{quiet});
     state.githubLog=typeof content==="string"?content:"";
@@ -168,6 +168,7 @@ async function loadGithubServerLog(quiet=true){
     state.logFetchedAt=Date.now();
   }catch(error){
     state.githubLogError="GitHub job logs not available yet: "+errorText(error);
+    state.logFetchedAt=Date.now();
   }finally{state.logBusy=false;}
 }
 async function refresh(quiet=false){
