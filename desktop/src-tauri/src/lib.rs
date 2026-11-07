@@ -408,7 +408,7 @@ fn find_netbird_peer() -> Result<String, String> {
     let mut output=None;
     for binary in binaries {
         if let Ok(result)=std::process::Command::new(&binary)
-            .args(["status","--table","--filter-by-names","minecraft-paper"])
+            .args(["status","--table"])
             .output() {
             if result.status.success() {
                 output=Some(String::from_utf8_lossy(&result.stdout).into_owned());
