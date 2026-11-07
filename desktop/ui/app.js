@@ -90,8 +90,12 @@ function currentPaper(){
   return directOnline()?state.direct:state.cloud?.bridge?.status||{};
 }
 function connectedLive(){
-  const live=currentPaper();
-  return Boolean(live?.session&&live.ready&&Date.now()-(live.updatedAt||0)<45000);
+  // Direct HTTP success is authenticated and timed at receipt by this PC;
+  // comparing against the Linux runner's wall clock can incorrectly mark a
+  // healthy session offline when the machines' clocks differ.
+  if(directOnline())return true;
+  const live=state.cloud?.bridge?.status||{};
+  return Boolean(live.session&&live.ready&&Date.now()-(live.updatedAt||0)<45000);
 }
 async function loadNetbirdAuto(){
   try{state.netbirdAuto=await invoke("netbird_auto_status");}catch{}
