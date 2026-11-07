@@ -96,9 +96,18 @@ function connectedLive(){
 async function loadNetbirdAuto(){
   try{state.netbirdAuto=await invoke("netbird_auto_status");}catch{}
 }
+let pendingDirectStatus=null;
 async function loadDirect(quiet=true){
-  try{state.direct=await run("direct_status",{}, {quiet});state.directError=null;}
-  catch(err){state.direct=null;state.directError=errorText(err);}
+  // Fast UI refresh and the slower GitHub refresh used to launch overlapping
+  // private requests every 4/12 seconds, especially while NetBird wakes an
+  // idle peer. Share one in-flight probe instead.
+  if(pendingDirectStatus)return pendingDirectStatus;
+  pendingDirectStatus=(async()=>{
+    try{state.direct=await run("direct_status",{}, {quiet});state.directError=null;}
+    catch(err){state.direct=null;state.directError=errorText(err);}
+  })();
+  try{return await pendingDirectStatus;}
+  finally{pendingDirectStatus=null;}
 }
 async function sendPaper(kind,args={}){
   if(directOnline())return run("direct_command",{kind,args});
