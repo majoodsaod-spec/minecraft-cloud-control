@@ -587,7 +587,7 @@ fn parse_peer_json(report: &str) -> Option<String> {
     let peers=body.get("peers")?.get("details")?.as_array()?;
     let mut candidates=Vec::new();
     for peer in peers {
-        let fqdn=peer.get("fqdn")?.as_str()?;
+        let Some(fqdn)=peer.get("fqdn").and_then(Value::as_str) else {continue;};
         let Some(id)=runner_peer_id(fqdn) else {continue;};
         let Some(ip)=peer.get("netbirdIp").and_then(Value::as_str) else {continue;};
         let Some(status)=peer.get("status").and_then(Value::as_str) else {continue;};
