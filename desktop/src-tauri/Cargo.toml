@@ -20,6 +20,7 @@ keyring = { version = "3.6", features = ["windows-native"] }
 dirs = "6"
 futures-util = "0.3"
 urlencoding = "2.1"
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
