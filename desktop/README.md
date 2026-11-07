@@ -75,3 +75,18 @@ For actual live status and command execution, configure your existing Cloudflare
 If you see **Latest server run failed**, open **GitHub Actions → Details → job logs** to diagnose the crash before starting another session. Do not force-cancel a live Minecraft job to refresh status.
 
 To get changes to the desktop application, download and install an updated successful Windows installer build from the [Windows installer workflow](https://github.com/majoodsaod-spec/minecraft-cloud-control/actions/workflows/build-windows.yml).
+
+## Quick Update — upgrade the app without manually reinstalling
+
+Starting with the first installer built after this change, Minecraft Cloud includes a **Quick Update** button in its top bar and in **Connections → Windows app updates**. It uses your already-connected GitHub account directly; Cloudflare is not involved.
+
+1. Open Minecraft Cloud and connect GitHub.
+2. Click **Quick Update**. A small indicator appears when a newer successful Windows installer build is available.
+3. Confirm **Install update**. The app downloads the latest artifact from your repository, extracts the verified build's NSIS setup executable into a temporary directory, launches it, and closes itself so Windows can replace the existing app.
+4. Follow the Windows installer prompts. Open Minecraft Cloud again normally; your Windows-stored credentials stay available.
+
+The current app version **does not yet contain this button**, so **one manual installer download** is necessary to get the updater. After installing that build, future upgrades can start inside the app.
+
+**What this is and isn't:** This is an *in-place, one-click installer upgrade*, not differential patching. GitHub Actions still builds the installer; the app downloads the complete installer automatically but does **not** require you to browse Artifacts, extract ZIPs, or install an unrelated second copy. Builds get a monotonically increasing `0.1.<GitHub workflow run number>` app version and a compiled-in GitHub Actions run ID so the updater can distinguish your installed build from a newer one. It only considers successful builds on the repository's `main` branch with the expected artifact name, verifies the expected single setup executable inside the archive, and never accepts arbitrary executable URLs from the UI.
+
+**Security:** GitHub artifact installers are not currently code-signed; Windows may show a SmartScreen prompt. Only update from your own repository and trusted successful workflow runs. The process leaves Minecraft workflows and world backups untouched. Expired/missing build artifacts cannot be installed by Quick Update.
