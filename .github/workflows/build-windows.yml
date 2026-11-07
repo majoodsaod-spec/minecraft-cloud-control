@@ -1,0 +1,74 @@
+name: Build Minecraft Cloud Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/build-windows.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: minecraft-desktop-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-installer:
+    name: Windows 11 · native NSIS installer
+    runs-on: windows-latest
+    timeout-minutes: 55
+    steps:
+      - name: Check out desktop source
+        uses: actions/checkout@v4
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+      - name: Set up Python for installer icon
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Create polished native Windows icon
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check Pillow==11.3.0
+          python desktop/scripts/make_icon.py
+      - name: Validate desktop frontend JavaScript
+        shell: pwsh
+        run: |
+          node --check desktop/ui/app.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install Tauri CLI
+        shell: pwsh
+        run: |
+          cargo install tauri-cli --version "^2" --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Compile Windows app and create installer
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          cargo tauri build --bundles nsis
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload Windows setup executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Minecraft-Cloud-Windows-Installer
+          path: desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 30
+      - name: Build summary
+        shell: pwsh
+        run: |
+          @"
+          ### Minecraft Cloud Desktop
+          - Windows installer built from source: `$env:GITHUB_SHA`
+          - Go to **Actions → Build Minecraft Cloud Windows installer → Artifacts**
+          - Download **Minecraft-Cloud-Windows-Installer** and extract the ZIP to run the installer
+          - The executable is not code-signed; Windows SmartScreen may show a warning
+          - Tokens are entered inside the installed app and stored by Windows Credential Manager
+          "@ >> $env:GITHUB_STEP_SUMMARY
