@@ -188,22 +188,50 @@ jobs:
 
   cleanup_backups:
     needs: minecraft
+    # Cleanup happens only after a newly verified world archive was uploaded.
+    # It is safe whether the dashboard asked for a stop or a restart.
     if: needs.minecraft.result == 'success' && needs.minecraft.outputs.backed_up == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Retain only the 10 newest world backups
+      - uses: actions/checkout@v4
+      - name: Delete surplus Minecraft world backups, never the latest five
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          # Only prune after a replacement run was successfully dispatched.
-          # Keep exactly the ten most recent unexpired minecraft-world artifacts.
-          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/artifacts?name=minecraft-world&per_page=100" \
-            --jq '.artifacts[] | select(.expired == false) | [.created_at, .id] | @tsv' \
-            | sort -r | tail -n +11 | cut -f2 | while read -r id; do
-              [[ -n "$id" ]] || continue
-              gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
-              echo "Removed older minecraft-world artifact $id"
-            done
+          # GitHub can take a moment to index the just-uploaded artifact.
+          # Never delete anything until we can see this run's fresh backup.
+          for attempt in 1 2 3 4; do
+            gh api --paginate "repos/$GITHUB_REPOSITORY/actions/artifacts?name=minecraft-world&per_page=100" \
+              --jq '.artifacts[] | select(.expired == false and .name == "minecraft-world") | [.created_at, (.id|tostring), (.workflow_run.id|tostring), (.size_in_bytes|tostring)] | @tsv' \
+              > "$RUNNER_TEMP/world-artifacts.tsv"
+            python server/prune_backups.py --current-run "$GITHUB_RUN_ID" \
+              < "$RUNNER_TEMP/world-artifacts.tsv" > "$RUNNER_TEMP/to-delete.tsv"
+            if grep -q $'\t' "$RUNNER_TEMP/world-artifacts.tsv" &&
+               awk -F '\t' -v id="$GITHUB_RUN_ID" '$3 == id { found=1 } END { exit !found }' "$RUNNER_TEMP/world-artifacts.tsv"; then
+              break
+            fi
+            if [[ "$attempt" == 4 ]]; then
+              echo "::warning::Fresh world backup is not yet visible via GitHub API; preserving all backups."
+              exit 0
+            fi
+            sleep 10
+          done
+          count=0
+          bytes=0
+          while IFS=$'\t' read -r artifact_id size; do
+            [[ -n "$artifact_id" ]] || continue
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id"
+            count=$((count + 1))
+            bytes=$((bytes + size))
+          done < "$RUNNER_TEMP/to-delete.tsv"
+          echo "Deleted $count redundant older world backups; reclaimed approximately $((bytes / 1048576)) MiB."
+          {
+            echo "### Minecraft world backup storage"
+            echo "- Kept the 5 newest verified backup artifacts."
+            echo "- Deleted $count older backup artifacts."
+            echo "- Reclaimed approximately $((bytes / 1048576)) MiB."
+            echo "- Kept the newly uploaded backup for run $GITHUB_RUN_ID."
+          } >> "$GITHUB_STEP_SUMMARY"
