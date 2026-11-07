@@ -1,0 +1,46 @@
+name: One-time Minecraft restart from verified world backup
+
+# Cancels the currently running server through shared workflow concurrency
+# and dispatches a replacement from a previously verified world artifact.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/one-time-paper-restart.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: continuous-paper-server
+  cancel-in-progress: true
+
+jobs:
+  restart-from-verified-backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify known previous world backup still exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BACKUP_RUN: "42389453154"
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BACKUP_RUN/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.name=="minecraft-world" and .expired==false and .size_in_bytes>0)] | .[0].id // empty')"
+          if [[ -z "$artifact_id" ]]; then
+            echo "::error::The verified world backup is no longer available. Not starting another server."
+            exit 1
+          fi
+          echo "Verified previous world artifact $artifact_id is available."
+      - name: Launch updated Minecraft server from that backup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BACKUP_RUN: "42389453154"
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run paper-state-test.yml --repo "$GITHUB_REPOSITORY" --ref main -f previous_run="$BACKUP_RUN"
+          echo "Requested new Minecraft session from verified backup run $BACKUP_RUN."
