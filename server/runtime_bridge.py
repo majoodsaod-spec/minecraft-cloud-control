@@ -60,6 +60,10 @@ class LiveBridge:
             return
         if not self.url.startswith("https://"):
             print("Cloudflare live bridge disabled: control URL must use HTTPS", flush=True)
+            # Also suppress later phase() requests, which would otherwise
+            # transmit the bearer token over an insecure HTTP connection.
+            self.url = ""
+            self.token = ""
             return
         self.thread=threading.Thread(target=self._loop,daemon=True)
         self.thread.start()
