@@ -43,6 +43,8 @@ jobs:
         run: |
           node --check desktop/ui/app.js
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tests/test_desktop_updater.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install Tauri CLI
         shell: pwsh
         run: |
