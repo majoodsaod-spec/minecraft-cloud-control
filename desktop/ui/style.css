@@ -1,4 +1,3 @@
-@import url("");
 :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI Variable","Segoe UI",sans-serif;font-synthesis:none;color:#20252c;background:#f7f8fa;font-size:14px;--mint:#168a70;--green:#13765e;--muted:#84909c;--line:#e9edf0;--soft:#f6f8f9;--shadow:0 6px 32px rgba(26,39,56,.055)}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;overflow:hidden}button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #72c9b188;outline-offset:2px}::selection{background:#c5e8d8}
 .window-shell{display:flex;min-height:100vh;height:100vh}
