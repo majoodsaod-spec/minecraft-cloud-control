@@ -23,8 +23,8 @@ class DirectControl:
         self.thread = None
 
     def start(self):
-        if not self.address or not self.token:
-            print("Direct NetBird control disabled: missing private IP or MINECRAFT_DIRECT_TOKEN", flush=True)
+        if not self.address or len(self.token) < 8:
+            print("Direct NetBird control disabled: missing private IP or token shorter than 8 characters", flush=True)
             return False
         # A private interface is mandatory, never wildcard/loopback/public.
         import ipaddress
