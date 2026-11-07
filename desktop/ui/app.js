@@ -8,7 +8,7 @@ const bytes=n=>!Number.isFinite(+n)?"—":(+n/1048576).toFixed(1)+" MB";
 const duration=s=>{s=Math.max(0,Math.floor(Number(s)||0));return [Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(x=>String(x).padStart(2,"0")).join(":");};
 const activeRun=r=>["in_progress","queued","waiting","requested","pending"].includes(r?.status);
 const isServer=r=>(r?.name||"").includes("Continuous Paper Minecraft Server")||(r?.path||"").includes("paper-state-test.yml");
-const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0};
+const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false};
 function flash(text){const box=$("#toast");box.textContent=text;box.classList.add("show");clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>box.classList.remove("show"),4300)}
 function btn(label,action="refresh",cls=""){return `<button class="btn ${cls}" data-action="${action}">${label}</button>`}
 function boxEmpty(title,body,icon="◇"){return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${body}</p></div>`}
@@ -26,6 +26,61 @@ function dialog(title,text,actions){
     const done=bool=>{$("#dialogBackdrop").classList.add("hidden");$("#dialogBackdrop").setAttribute("aria-hidden","true");resolve(bool);};
     $("#dialogCancel").onclick=()=>done(false);$("#dialogConfirm").onclick=()=>done(true);
   });
+}
+function syncUpdateButton(){
+  const button=$("#quickUpdate");
+  if(!button)return;
+  button.disabled=state.updateChecking||!state.github.connected;
+  const available=Boolean(state.update?.available);
+  $("#updateIndicator").hidden=!available;
+  $("#quickUpdateLabel").textContent=state.updateChecking?"Checking…":available?"Update available":"Quick Update";
+  button.title=!state.github.connected?"Connect GitHub to check for updates":
+    available?"Install new build #"+state.update.runNumber+" over this app":
+    "Check GitHub for a newer Windows desktop build";
+}
+async function checkDesktopUpdate(silent=false){
+  if(!state.github.connected){
+    if(!silent)flash("Connect GitHub before checking for updates.");
+    return;
+  }
+  if(state.updateChecking)return;
+  state.updateChecking=true;
+  syncUpdateButton();
+  try{
+    const update=await run("desktop_check_update",{}, {quiet:silent});
+    state.update=update;
+    if(!silent&&!update.available){
+      flash("Minecraft Cloud is up to date · installer build #"+update.runNumber);
+    }
+    if(update.available&&!silent){
+      flash("Update available! Build #"+update.runNumber+" · click Quick Update again to install.");
+    }
+    return update;
+  }catch(e){
+    if(!silent)flash(errorText(e));
+  }finally{
+    state.updateChecking=false;
+    syncUpdateButton();
+    if(state.page==="connections")render();
+  }
+}
+async function quickUpdate(){
+  if(!state.github.connected)return flash("Connect GitHub first to enable Quick Update.");
+  const update=state.update?.available?state.update:await checkDesktopUpdate(false);
+  if(!update?.available)return;
+  if(!await dialog("Install Minecraft Cloud update?",
+    "Build #"+update.runNumber+" ("+update.commit+"). The app will download the latest successful Windows installer directly from GitHub, close, and install it over your existing app. Your Windows credentials and Minecraft world remain untouched. This downloads the full installer, not a delta patch."))return;
+  state.updateChecking=true;syncUpdateButton();
+  flash("Downloading and preparing update from GitHub…");
+  try{
+    await run("desktop_install_update",{expectedBuild:update.latestBuild});
+    // Usually the app exits after launching NSIS.
+    flash("Windows installer launched. Follow any Windows prompts.");
+  }catch(e){
+    flash("Update failed: "+errorText(e));
+  }finally{
+    state.updateChecking=false;syncUpdateButton();
+  }
 }
 function connectedLive(){
   const live=state.cloud?.bridge?.status;
@@ -120,7 +175,8 @@ function drawConnections(){
      <div class="field"><label for="cloudPass">Dashboard admin password</label><input id="cloudPass" type="password" placeholder="Enter dashboard password" autocomplete="off"></div>
      <button class="btn primary" data-action="connect-cloud">Save and test live connection</button>
      ${state.cloudError?`<p class="field-tip" style="color:#c46b53">Last error: ${esc(state.cloudError)}</p>`:""}
-   `)}</div>`;
+   `)}</div>`+
+   `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Windows app updates</h2>${state.update?.available?pill("● New build available",""):pill("Installed app","muted")}</div><p class="field-tip">Check GitHub for the latest successful Windows installer. Quick Update upgrades your existing installation without manually downloading or extracting ZIP files. Your login remains saved on this PC.</p><div class="header-actions" style="justify-content:flex-start;margin-top:16px"><button class="btn primary" data-action="check-update" ${gh?"":"disabled"}>${state.update?.available?"Install update #"+state.update.runNumber:"↻ Quick Update"}</button><span class="field-tip">${state.update?"Installed build "+(state.update.currentBuild||"legacy")+" · Latest build "+state.update.runNumber:"No update check performed yet"}</span></div></section>`;
 }
 function render(){
   const titles={overview:"Overview",console:"Live Console",workflows:"GitHub Actions",files:"Repository Files",backups:"World Backups",connections:"Connections"};
@@ -131,6 +187,7 @@ function render(){
   $("#cloudShort").textContent=connectedLive()?"Live bridge online":"Live bridge unavailable";
   const pages={overview:drawOverview,console:drawConsole,workflows:drawWorkflows,files:drawFiles,backups:drawBackups,connections:drawConnections};
   (pages[state.page]||drawOverview)();
+  syncUpdateButton();
   const pageNode=$("#content");
   // Animate navigation, never periodic status refreshes: telemetry stays calm.
   if(state._lastAnimatedPage!==state.page){
@@ -185,11 +242,13 @@ async function refresh(quiet=false){
 async function startApp(){
   try{state.github=await invoke("github_status")}catch{state.github={connected:false}}
   render();await refresh(true);
+  if(state.github.connected)checkDesktopUpdate(true);
   if(!state.github.connected){state.page="connections";render();}
 }
 async function action(type,id){
   switch(type){
   case "refresh":return refresh();
+  case "check-update":return state.update?.available?quickUpdate():checkDesktopUpdate(false);
   case "server-logs":{
     if(!state.github.connected)return flash("Connect GitHub first.");
     state.page="console";state.githubLog=null;state.githubLogError=null;
@@ -197,11 +256,11 @@ async function action(type,id){
   }
   case "connect-github":{
     const token=$("#token")?.value||"";if(!token)return flash("Enter a GitHub token first.");
-    try{state.github=await run("connect_github",{token});$("#token").value="";flash("GitHub connected securely.");await refresh();state.page="overview";render();}catch{}return;
+    try{state.github=await run("connect_github",{token});$("#token").value="";flash("GitHub connected securely.");await refresh();state.page="overview";render();checkDesktopUpdate(true);}catch{}return;
   }
   case "disconnect-github":{
     if(!await dialog("Disconnect GitHub?","Removes the saved GitHub token from Windows Credential Manager."))return;
-    await run("disconnect_github");state.github={connected:false};state.overview=null;state.workflows=null;flash("GitHub disconnected.");return render();
+    await run("disconnect_github");state.github={connected:false};state.overview=null;state.workflows=null;state.update=null;flash("GitHub disconnected.");return render();
   }
   case "connect-cloud":{
     const url=$("#cloudUrl")?.value||"",password=$("#cloudPass")?.value||"";
