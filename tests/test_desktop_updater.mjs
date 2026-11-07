@@ -37,3 +37,13 @@ test("native build IDs and app versions advance with GitHub installer runs",()=>
   assert.equal(config.identifier,"com.minecraftcloud.desktop");
   assert.equal(config.bundle.targets[0],"nsis");
 });
+
+test("opt-in NetBird lifecycle never disconnects an existing user VPN session",()=>{
+  assert.match(rust,/const AUTO_NETBIRD:/);
+  assert.match(rust,/if netbird_is_connected\(&report\) \{return Ok\(false\);\}/);
+  assert.match(rust,/if !was_owned \{return;\}/);
+  assert.match(rust,/netbird_cli\(&exe,"down"\)/);
+  assert.match(rust,/tauri::RunEvent::Exit/);
+  assert.match(rust,/netbird_auto_status,netbird_set_auto/);
+  assert.match(ui,/id="netbirdAuto"/);
+});
