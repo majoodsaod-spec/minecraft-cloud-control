@@ -22,6 +22,16 @@ TEXT_SUFFIXES = {".txt",".json",".yml",".yaml",".properties",".conf",".cfg",".to
 MAX_FILE = 256 * 1024
 
 
+def unsafe_shutdown_command(command: str) -> bool:
+    """Reserve every namespaced Paper/Bukkit stop or restart for safe handoff."""
+    first = command.strip().lstrip("/").split(maxsplit=1)
+    if not first:
+        return False
+    verb = first[0].lower().split(":")[-1]
+    return verb in {"stop", "restart"}
+
+
+
 class LiveBridge:
     def __init__(self, data: Path, session: str, players: set, lock, log_lines, ready, send, restart_event, shutdown_event, observed, paper_pid):
         self.data=data.resolve()
@@ -123,7 +133,7 @@ class LiveBridge:
             cmd=args.get("command")
             if not isinstance(cmd,str) or not 0<len(cmd)<=240 or "\n" in cmd or "\r" in cmd:
                 raise ValueError("Invalid console command")
-            if cmd.lower().lstrip("/").strip() in ("stop","restart"):
+            if unsafe_shutdown_command(cmd):
                 raise ValueError("Use the safe restart button for server shutdown")
             self.send(cmd.lstrip("/"))
             return "Sent to Paper console"
