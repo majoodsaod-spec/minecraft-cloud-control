@@ -63,3 +63,15 @@ The resulting installer is in `desktop/src-tauri/target/release/bundle/nsis/`.
 ## Security caveats
 
 Never post PATs or dashboard passwords in GitHub Issues, Actions logs, chat, or screenshots. Revoke any leaked PAT immediately. Keep the app installed only on trusted Windows accounts. Direct GitHub access does not remove GitHub Actions run-time or hosting limitations.
+
+## GitHub connected, but no live Paper updates?
+
+**GitHub authentication and Minecraft's live bridge are separate.** The desktop app can read workflows, start runs, inspect jobs, edit repository files and download backups directly via GitHub. GitHub's REST API does **not** give it the Minecraft process's current player list, memory, console command channel or server heartbeat.
+
+The Overview now distinguishes a **failed server run**, an **active GitHub runner (Paper unverified)**, and a **verified live Paper heartbeat** instead of confusing a missing live bridge with a missing GitHub connection. When Cloudflare is unavailable, open **Live Console → Load GitHub logs** for a **read-only, potentially delayed** snapshot of the current/last GitHub Actions job. GitHub may not expose an in-progress job's logs until later. This fallback cannot send Minecraft console commands or verify server uptime.
+
+For actual live status and command execution, configure your existing Cloudflare Worker URL and dashboard admin password in **Connections** and ensure its Minecraft bridge is healthy. Connecting GitHub alone cannot replace this server-side relay.
+
+If you see **Latest server run failed**, open **GitHub Actions → Details → job logs** to diagnose the crash before starting another session. Do not force-cancel a live Minecraft job to refresh status.
+
+To get changes to the desktop application, download and install an updated successful Windows installer build from the [Windows installer workflow](https://github.com/majoodsaod-spec/minecraft-cloud-control/actions/workflows/build-windows.yml).
