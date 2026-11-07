@@ -247,9 +247,9 @@ overview=function(p){
   actions.append(proAction("↻ Save & restart",()=>proCommand("restart",{},"Save the world, disconnect players, and restart the server?"),"outline",!safeStop));
   actions.append(proAction("⟳ Refresh",()=>cloudRefresh(true)));
   if(["saving","stopping","backing_up","finishing"].includes(phase))proNotice(controls,"Safe shutdown is in progress. Please keep the server running until backup verification completes.");
-  if(!isBridgeLive()&&cloudState.active.length)proNode(controls,"p","muted small",phase==="bridge_missing"
-    ?"No live heartbeat: check the GitHub Actions server log for 'Cloudflare live bridge enabled' or 'Cloudflare bridge connection failed'. Also check Worker BRIDGE_TOKEN, MC_BRIDGE Durable Object binding, and GitHub CLOUDFLARE_CONTROL_URL / CLOUDFLARE_BRIDGE_TOKEN."
-    :"Waiting for the server's secure live connection before enabling safe controls.");
+  if(!isBridgeLive()&&cloudState.active.length)proNotice(controls,phase==="bridge_missing"
+    ?"Save & Restart is disabled for world safety: Cloudflare is not receiving live heartbeats. The Minecraft server can still be online. If Cloudflare hit its free Durable Object database quota, the updated memory-based bridge should reconnect after deployment or the daily quota reset. Never cancel the running job to force a restart; it would skip the verified world backup."
+    :"Save & Restart will become available when the server's live control bridge connects.");
   const extras=proPanel(p,"Quick access");
   const links=proNode(extras,"div","dashboard-actions");
   for(const [label,id] of [["Server settings","settings"],["Online players","players"],["Live console","console"],["World backups","worlds"],["Files","files"],["Plugins","plugins"]]){
