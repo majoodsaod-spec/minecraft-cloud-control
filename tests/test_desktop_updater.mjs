@@ -66,3 +66,11 @@ test("background polling preserves unsaved user input and secret fields",()=>{
     assert.ok(ui.includes('"'+id+'"'),"Draft field not protected: "+id);
   }
 });
+
+test("Direct Paper accepts 8-character secrets in both Rust and Windows UI",()=>{
+  assert.match(rust,/if token\.len\(\)<8/);
+  assert.match(rust,/if trimmed\.len\(\)<8 \|\| trimmed\.len\(\)>512/);
+  assert.match(ui,/if\(token\.length<8\)/);
+  assert.doesNotMatch(rust,/Direct control token must be at least 24 characters/);
+  assert.doesNotMatch(ui,/token\.length<24/);
+});
