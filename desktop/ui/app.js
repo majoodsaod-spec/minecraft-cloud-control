@@ -8,7 +8,7 @@ const bytes=n=>!Number.isFinite(+n)?"—":(+n/1048576).toFixed(1)+" MB";
 const duration=s=>{s=Math.max(0,Math.floor(Number(s)||0));return [Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(x=>String(x).padStart(2,"0")).join(":");};
 const activeRun=r=>["in_progress","queued","waiting","requested","pending"].includes(r?.status);
 const isServer=r=>(r?.name||"").includes("Continuous Paper Minecraft Server")||(r?.path||"").includes("paper-state-test.yml");
-const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,netbirdAuto:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false};
+const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,netbirdAuto:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null)};
 function flash(text){const box=$("#toast");box.textContent=text;box.classList.add("show");clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>box.classList.remove("show"),4300)}
 function btn(label,action="refresh",cls=""){return `<button class="btn ${cls}" data-action="${action}">${label}</button>`}
 function boxEmpty(title,body,icon="◇"){return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${body}</p></div>`}
@@ -203,6 +203,23 @@ function drawConnections(){
    `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Direct Paper · NetBird</h2>${directOnline()?pill("● Private connection online",""):pill("○ Not connected","warn")}</div><p class="field-tip">Connect directly to your temporary GitHub Actions Paper runner. NetBird must be connected on your Windows PC. The app automatically discovers connected minecraft-paper-* peers after each restart. Live console and server metrics work without Cloudflare.</p><div class="notice good" style="margin-top:17px"><label for="netbirdAuto" style="display:flex;align-items:center;gap:12px;cursor:pointer"><input id="netbirdAuto" type="checkbox" ${state.netbirdAuto?.enabled?"checked":""} style="width:17px;height:17px;accent-color:#158b69"><span><strong>Automatically connect NetBird</strong><span style="display:block;font-size:11px;margin-top:5px">Connect on app launch and disconnect when it closes, only if Minecraft Cloud started the VPN itself.</span></span></label><div style="margin-top:9px;font-size:11px">NetBird: ${state.netbirdAuto?.connected?"Connected":"Not connected"} ${state.netbirdAuto?.ownedByApp?"· Managed by Minecraft Cloud":""}</div></div><div class="field" style="margin-top:16px"><label for="directToken">Direct-control secret</label><input id="directToken" type="password" autocomplete="off" placeholder="Value saved as MINECRAFT_DIRECT_TOKEN in GitHub Secrets"></div><div class="field"><label for="directPeer">Manual NetBird peer IP (optional)</label><input id="directPeer" placeholder="Leave blank for automatic discovery"></div><div class="header-actions" style="justify-content:flex-start"><button class="btn primary" data-action="connect-direct">Connect Direct Paper</button><button class="btn flat" data-action="test-direct">Test connection</button></div>${state.directError?`<p class="field-tip" style="color:#b96154;margin-top:12px">${esc(state.directError)}</p>`:""}</section>`+
    `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Windows app updates</h2>${state.update?.available?pill("● New build available",""):pill("Installed app","muted")}</div><p class="field-tip">Check GitHub for the latest successful Windows installer. Quick Update upgrades your existing installation without manually downloading or extracting ZIP files. Your login remains saved on this PC.</p><div class="header-actions" style="justify-content:flex-start;margin-top:16px"><button class="btn primary" data-action="check-update" ${gh?"":"disabled"}>${state.update?.available?"Install update #"+state.update.runNumber:"↻ Quick Update"}</button><span class="field-tip">${state.update?"Installed build "+(state.update.currentBuild||"legacy")+" · Latest build "+state.update.runNumber:"No update check performed yet"}</span></div></section>`;
 }
+// Edits survive background telemetry updates, navigation, and incidental
+// rerenders. Never store typed secrets outside this running app process.
+const draftFields=new Set(["token","cloudUrl","cloudPass","directToken","directPeer",
+  "filepath","filecontent","commandText"]);
+function restoreDrafts(){
+  for(const [id,value] of Object.entries(state.drafts)){
+    const el=document.getElementById(id);
+    if(el&&("value" in el))el.value=value;
+  }
+}
+function clearDrafts(...ids){
+  for(const id of ids)delete state.drafts[id];
+}
+function editing(){
+  const el=document.activeElement;
+  return el&&["INPUT","TEXTAREA","SELECT"].includes(el.tagName);
+}
 function render(){
   const titles={overview:"Overview",console:"Live Console",workflows:"GitHub Actions",files:"Repository Files",backups:"World Backups",connections:"Connections"};
   $("#breadcrumb").textContent=titles[state.page]||"Overview";
@@ -212,6 +229,7 @@ function render(){
   $("#cloudShort").textContent=connectedLive()?"Live bridge online":"Live bridge unavailable";
   const pages={overview:drawOverview,console:drawConsole,workflows:drawWorkflows,files:drawFiles,backups:drawBackups,connections:drawConnections};
   (pages[state.page]||drawOverview)();
+  restoreDrafts();
   syncUpdateButton();
   const pageNode=$("#content");
   // Animate navigation, never periodic status refreshes: telemetry stays calm.
@@ -261,7 +279,10 @@ async function refresh(quiet=false){
       try{state.workflows=await run("github_workflows",{}, {quiet:true});}catch{}
     }
     if(state.page==="console"&&!connectedLive()&&state.github.connected&&Date.now()-state.logFetchedAt>30000)await loadGithubServerLog(true);
-    state.lastFetch=Date.now();render();
+    state.lastFetch=Date.now();
+    // A background refresh must not replace a focused text field. The next
+    // refresh after typing will reconcile the visible data.
+    if(!editing())render();
   }finally{state.busy=false;$("#refresh").disabled=false}
 }
 async function startApp(){
@@ -282,7 +303,7 @@ async function action(type,id){
   }
   case "connect-github":{
     const token=$("#token")?.value||"";if(!token)return flash("Enter a GitHub token first.");
-    try{state.github=await run("connect_github",{token});$("#token").value="";flash("GitHub connected securely.");await refresh();state.page="overview";render();checkDesktopUpdate(true);}catch{}return;
+    try{state.github=await run("connect_github",{token});clearDrafts("token");$("#token").value="";flash("GitHub connected securely.");await refresh();state.page="overview";render();checkDesktopUpdate(true);}catch{}return;
   }
   case "disconnect-github":{
     if(!await dialog("Disconnect GitHub?","Removes the saved GitHub token from Windows Credential Manager."))return;
@@ -304,6 +325,7 @@ async function action(type,id){
     if(token.length<24)return flash("Enter the same strong secret saved as MINECRAFT_DIRECT_TOKEN in GitHub Actions.");
     try{
       await run("direct_configure",{token,peerIp});
+      clearDrafts("directToken","directPeer");
       await loadDirect(false);
       flash(directOnline()?"Direct Paper connected! No Cloudflare required.":"Credentials saved. Start a new runner with NetBird enabled, then test again.");
       render();
@@ -315,7 +337,7 @@ async function action(type,id){
   case "connect-cloud":{
     const url=$("#cloudUrl")?.value||"",password=$("#cloudPass")?.value||"";
     if(!url||!password)return flash("Enter a Worker URL and password.");
-    try{await run("configure_cloudflare",{url,password});await loadCloud(false);flash(connectedLive()?"Live bridge connected.":"Connection saved; live server still unavailable.");render();}catch{}return;
+    try{await run("configure_cloudflare",{url,password});clearDrafts("cloudPass");await loadCloud(false);flash(connectedLive()?"Live bridge connected.":"Connection saved; live server still unavailable.");render();}catch{}return;
   }
   case "start-server":{
     if(!state.github.connected)return flash("Connect GitHub first.");
@@ -360,7 +382,7 @@ async function action(type,id){
   }
   case "load-file":{
     const path=$("#filepath")?.value.trim()||state.filePath;state.filePath=path;
-    try{state.file=await run("github_file",{path});state.file.path=path;render();}catch{}return;
+    try{state.file=await run("github_file",{path});clearDrafts("filecontent");state.file.path=path;render();}catch{}return;
   }
   case "save-file":{
     if(!state.file?.sha)return flash("Load a file first.");
@@ -369,7 +391,7 @@ async function action(type,id){
     const raw=new TextEncoder().encode(value);let binary="";for(const b of raw)binary+=String.fromCharCode(b);
     try{
       await run("github_save_file",{args:{path:state.filePath,sha:state.file.sha,content_base64:btoa(binary),message:"Desktop: update "+state.filePath}});
-      flash("File committed to GitHub.");state.file=await run("github_file",{path:state.filePath});state.file.path=state.filePath;render();
+      flash("File committed to GitHub.");clearDrafts("filecontent");state.file=await run("github_file",{path:state.filePath});state.file.path=state.filePath;render();
     }catch{}return;
   }
   case "download":{
@@ -384,23 +406,25 @@ document.addEventListener("click",ev=>{
   const button=ev.target.closest("[data-action]");
   if(button){ev.preventDefault();action(button.dataset.action,button.dataset.id);}
 });
+document.addEventListener("input",ev=>{
+  if(draftFields.has(ev.target?.id)){
+    state.drafts[ev.target.id]=ev.target.value;
+  }
+});
 document.addEventListener("change",ev=>{
   if(ev.target?.id==="netbirdAuto")action("netbird-auto");
 });
 document.addEventListener("submit",async ev=>{
   if(ev.target.id!=="consoleForm")return;
   ev.preventDefault();const cmd=$("#commandText").value.trim();if(!cmd)return;
-  try{await sendPaper("console",{command:cmd});$("#commandText").value="";flash("Command sent to Paper.");setTimeout(()=>refresh(true),1000);}catch{}
+  try{await sendPaper("console",{command:cmd});clearDrafts("commandText");$("#commandText").value="";flash("Command sent to Paper.");setTimeout(()=>refresh(true),1000);}catch{}
 });
 $("#refresh").addEventListener("click",()=>refresh());
 setInterval(()=>{$("#time").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});},1000);
 setInterval(async()=>{
   if(document.visibilityState!=="visible")return;
   await loadDirect(true);
-  if(["overview","console","connections"].includes(state.page)){
-    if(state.page==="console"&&document.activeElement?.id==="commandText")return;
-    render();
-  }
+  if(["overview","console","connections"].includes(state.page)&&!editing())render();
 },4000);
 setInterval(()=>{if(document.visibilityState==="visible")refresh(true)},12000);
 startApp();
