@@ -97,6 +97,9 @@ function runRow(r,withCancel=false){
 function drawOverview(){
   const main=latestServerRun(),live=state.cloud?.bridge?.status||{},online=connectedLive();
   const github=state.github.connected;
+  const runnerStarted=main&&(main.run_started_at||main.created_at);
+  const runnerElapsed=activeRun(main)&&runnerStarted
+    ?Math.max(0,Math.floor((Date.now()-new Date(runnerStarted).getTime())/1000)):null;
   const status=online?"Paper online":activeRun(main)?"Runner active · Paper unverified":main?.conclusion==="failure"?"Latest server run failed":main?.conclusion==="success"?"Last session finished":github?"No active Minecraft runner":"GitHub not connected";
   const statePill=online?pill("● LIVE SERVER",""):activeRun(main)?pill("◉ GITHUB RUN ACTIVE","warn"):main?.conclusion==="failure"?pill("● WORKFLOW FAILED","warn"):pill("○ NO LIVE PAPER DATA");
   const desc=online?"Paper is responding to live status requests. Your world is ready.":activeRun(main)?"GitHub confirms a workflow is active, but it does not verify that Paper is ready. Use GitHub logs to check startup.":main?.conclusion==="failure"?"GitHub reports the last Minecraft workflow failed. Open its job logs below to identify the problem.":github?"GitHub is connected; there is no confirmed live Paper heartbeat. Start a new run only if no Minecraft workflow is active.":"Connect GitHub to manage workflows. GitHub access does not provide a live Paper connection.";
@@ -107,13 +110,14 @@ function drawOverview(){
    ${stat("Empty time",online?duration(live.emptyFor||0):"—","Restart after 1 hour empty","⌛")}
    ${stat("Memory used",online&&live.memoryMiB!=null?Number(live.memoryMiB).toFixed(0)+" MB":"—","Paper Java process","▦")}
   </div>`;
+  const runnerCard=main?panel("GitHub runner · independent status",`<div class="list-stat"><span>Latest Minecraft run</span><strong>#${esc(main.run_number)}</strong></div><div class="list-stat"><span>Workflow status</span><strong>${esc(main.conclusion||main.status||"unknown")}</strong></div><div class="list-stat"><span>Runner elapsed</span><strong>${runnerElapsed!==null?duration(runnerElapsed):"—"}</strong></div><p class="field-tip" style="margin-top:14px">Runner elapsed measures GitHub Actions runtime, not Paper uptime. Minecraft player and memory metrics require a functioning live bridge.</p><button class="btn small flat" data-action="server-logs">View GitHub job logs</button>`):"";
   const runs=state.overview?.runs||[];
   const recent=runs.slice(0,5);
   const actions=`<div class="columns">
    ${panel("Recent activity",recent.length?`<div class="run-list">${recent.map(r=>runRow(r)).join("")}</div>`:boxEmpty("No runs loaded","Connect your GitHub account to see recent activity.","⎇"),`<button class="btn small flat" data-page="workflows">View all →</button>`)}
    ${panel("Connection health",`<div class="list-stat"><span>GitHub</span><strong>${github?"● Connected":"○ Not connected"}</strong></div><div class="list-stat"><span>Minecraft live bridge</span><strong>${online?"● Connected":"○ Offline / unavailable"}</strong></div><div class="list-stat"><span>Minecraft workflow</span><strong>${main?esc(main.conclusion||main.status||"unknown"):"—"}</strong></div><div class="list-stat"><span>Latest run</span><strong>${main?esc("#"+main.run_number):"—"}</strong></div><div class="list-stat"><span>World backups</span><strong>${(state.overview?.artifacts||[]).filter(a=>!a.expired).length}</strong></div><p class="field-tip" style="margin-top:18px">GitHub workflow management works without Cloudflare. Safe live commands need a working server bridge.</p>`)}
    </div>`;
-  $("#content").innerHTML=header("WELCOME BACK","Your server, beautifully managed.","Everything important about your Minecraft world, in one calm place.",btn("↻ Refresh","refresh","flat"))+hero+stats+actions;
+  $("#content").innerHTML=header("WELCOME BACK","Your server, beautifully managed.","Everything important about your Minecraft world, in one calm place.",btn("↻ Refresh","refresh","flat"))+hero+stats+runnerCard+actions;
 }
 function drawWorkflows(){
   const workflows=(state.workflows||[]).filter(w=>w.state!=="deleted"),runs=state.overview?.runs||[];
@@ -170,8 +174,8 @@ function drawConnections(){
      :`<div class="field"><label for="token">GitHub personal access token</label><input type="password" id="token" placeholder="github_pat_..." autocomplete="off"></div><button class="btn primary" data-action="connect-github">Connect GitHub ↗</button><p class="field-tip">Grant access to this repository with Actions read/write and Contents read/write permissions. Do not share the token in chat or screenshots.</p>`}
    `)}${panel("Cloudflare · Optional live bridge",`
      ${pill(connectedLive()?"● Live bridge online":"○ Live bridge unavailable",connectedLive()?"":"warn")}
-     <p class="field-tip" style="margin:15px 0 20px">Optional. Live Paper console, player telemetry and safe restart use your existing Cloudflare Worker. GitHub management works without it.</p>
-     <div class="field"><label for="cloudUrl">Cloudflare Worker URL</label><input id="cloudUrl" placeholder="https://your-worker.workers.dev" autocomplete="off"></div>
+     <p class="field-tip" style="margin:15px 0 20px">The app needs this separate connection to show actual player count, Paper uptime, empty time and memory. Enter your existing Cloudflare dashboard admin password below; GitHub login alone cannot provide live telemetry.</p>
+     <div class="field"><label for="cloudUrl">Cloudflare Worker URL</label><input id="cloudUrl" placeholder="https://minecraft-cloud-control.majood-saod.workers.dev" value="https://minecraft-cloud-control.majood-saod.workers.dev" autocomplete="off"></div>
      <div class="field"><label for="cloudPass">Dashboard admin password</label><input id="cloudPass" type="password" placeholder="Enter dashboard password" autocomplete="off"></div>
      <button class="btn primary" data-action="connect-cloud">Save and test live connection</button>
      ${state.cloudError?`<p class="field-tip" style="color:#c46b53">Last error: ${esc(state.cloudError)}</p>`:""}
