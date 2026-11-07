@@ -545,7 +545,7 @@ fn netbird_auto_status(ownership: tauri::State<'_,Mutex<NetbirdOwnership>>) -> N
     }
 }
 #[tauri::command]
-async fn netbird_set_auto(
+fn netbird_set_auto(
     enabled: bool, ownership: tauri::State<'_,Mutex<NetbirdOwnership>>
 ) -> Result<NetbirdAutoStatus,String> {
     save_secret(AUTO_NETBIRD,if enabled {"on"} else {"off"})?;
