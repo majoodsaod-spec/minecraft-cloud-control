@@ -80,6 +80,14 @@ jobs:
               fi
               sleep 15
             done
+            # An intentional safe stop is recorded with the latest verified
+            # world backup. Scheduled recovery must respect it even when the
+            # Cloudflare desired-power endpoint is unavailable.
+            if [[ "$EVENT_NAME" == "schedule" && -f previous/stop-requested ]]; then
+              echo "Latest verified backup requested offline state; skipping scheduled recovery."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "REQUIRE_RESTORE=true" >> "$GITHUB_ENV"
           else
             echo "No existing backup found; first-time new world"
@@ -156,6 +164,7 @@ jobs:
           path: |
             cycle-output/worlds.zip
             cycle-output/worlds.zip.sha256
+            cycle-output/stop-requested
           retention-days: 90
           if-no-files-found: error
       - name: Confirm saved and stopped
