@@ -179,3 +179,12 @@ Fixed since last maintenance: Python syntax
 Checks cover Python source syntax, Python tests, both dashboard scripts, Worker and bridge JavaScript syntax, and GitHub Actions workflow YAML. A passing check that failed in the previous report is marked *fixed since last maintenance*. This reports a verified recovery; it does **not** imply that automation repaired any code. New and continuing failures are recorded, and a failing maintenance run is marked unsuccessful **after** committing its report. Even repeated all-good runs get distinct numbered entries at the 50-day interval. Actual reports deliberately omit secrets and raw logs.
 
 You can initiate a manual check in **Actions → Minecraft maintenance log → Run workflow**. It creates a new entry even before 50 days have elapsed. To allow the workflow to push its report, repository Actions settings must permit `GITHUB_TOKEN` with contents write access and must not block GitHub Actions bot commits. A scheduled workflow might be disabled by GitHub's 60-day public-repository inactivity rule; generating reports is not a guarantee that scheduled workflows or continuous Minecraft hosting will remain available.
+
+
+## Native Windows desktop app
+
+The repository now includes a lightweight, polished **Tauri Windows app** in [`desktop/`](desktop/README.md), with a macOS-inspired interface, secure Windows Credential Manager integration, and direct GitHub API access. It can inspect workflow runs, manually dispatch workflows, cancel **non-Minecraft** Actions runs, edit repository text files, and download world backups without Cloudflare.
+
+Live Paper console, player telemetry and **safe** Save & Stop / Save & Restart remain available when the optional Cloudflare live bridge is healthy. The app deliberately refuses to force-cancel the Minecraft runner, which would bypass the verified backup sequence.
+
+An automatic Windows NSIS installer workflow is available at [Build Minecraft Cloud Windows installer](https://github.com/majoodsaod-spec/minecraft-cloud-control/actions/workflows/build-windows.yml). Download the `Minecraft-Cloud-Windows-Installer` build artifact from a successful run, unzip it and run the `*-setup.exe` installer. See [the desktop guide](desktop/README.md) for requirements, token permissions, security and local build details.
