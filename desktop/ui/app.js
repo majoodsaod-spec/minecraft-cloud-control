@@ -129,6 +129,16 @@ function render(){
   $("#cloudShort").textContent=connectedLive()?"Live bridge online":"Live bridge unavailable";
   const pages={overview:drawOverview,console:drawConsole,workflows:drawWorkflows,files:drawFiles,backups:drawBackups,connections:drawConnections};
   (pages[state.page]||drawOverview)();
+  const pageNode=$("#content");
+  // Animate navigation, never periodic status refreshes: telemetry stays calm.
+  if(state._lastAnimatedPage!==state.page){
+    pageNode.classList.remove("mc-page-enter");
+    void pageNode.offsetWidth;
+    pageNode.classList.add("mc-page-enter");
+    state._lastAnimatedPage=state.page;
+  }else{
+    pageNode.classList.remove("mc-page-enter");
+  }
 }
 async function loadOverview(quiet=false){
   if(!state.github.connected)return;
