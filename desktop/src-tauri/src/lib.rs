@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::OnceLock;
-use tauri::Manager;
+
 
 const REPO: &str = "majoodsaod-spec/minecraft-cloud-control";
 const SERVER_WORKFLOW: &str = "paper-state-test.yml";
@@ -76,8 +76,11 @@ async fn github_overview() -> Result<Value, String> {
         github("/actions/artifacts?name=minecraft-world&per_page=30",reqwest::Method::GET,None),
         github("",reqwest::Method::GET,None)
     );
-    Ok(json!({"runs":runs?["workflow_runs"],"artifacts":artifacts?["artifacts"],
-        "repository":repo?["full_name"]}))
+    let runs = runs?;
+    let artifacts = artifacts?;
+    let repo = repo?;
+    Ok(json!({"runs":runs["workflow_runs"],"artifacts":artifacts["artifacts"],
+        "repository":repo["full_name"]}))
 }
 #[tauri::command]
 async fn github_workflows() -> Result<Value, String> {
@@ -95,6 +98,14 @@ async fn github_dispatch(workflow_id: String) -> Result<Value, String> {
         "paper-state-test.yml","dashboard-checks.yml","maintenance-log.yml"
     ];
     if !ALLOWED.contains(&workflow_id.as_str()) { return Err("That workflow cannot be started from the app".into()); }
+    if workflow_id == SERVER_WORKFLOW {
+        let runs=github(&format!("/actions/workflows/{SERVER_WORKFLOW}/runs?per_page=30"),
+            reqwest::Method::GET,None).await?;
+        let active=runs["workflow_runs"].as_array().map(|items|items.iter().any(|r|
+            ["in_progress","queued","waiting","requested","pending"].contains(
+                &r["status"].as_str().unwrap_or("")))).unwrap_or(false);
+        if active { return Err("The Minecraft server already has an active GitHub Actions run; no duplicate was started".into()); }
+    }
     github(&format!("/actions/workflows/{workflow_id}/dispatches"),reqwest::Method::POST,
            Some(json!({"ref":"main"}))).await
 }
