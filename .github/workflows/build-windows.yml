@@ -48,9 +48,18 @@ jobs:
         run: |
           cargo install tauri-cli --version "^2" --locked
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Give each successful installer an upgrade version
+        shell: pwsh
+        run: |
+          $path = "desktop/src-tauri/tauri.conf.json"
+          $config = Get-Content $path -Raw | ConvertFrom-Json
+          $config.version = "0.1.${{ github.run_number }}"
+          $config | ConvertTo-Json -Depth 30 | Set-Content -Path $path -Encoding utf8
       - name: Compile Windows app and create installer
         working-directory: desktop
         shell: pwsh
+        env:
+          MC_DESKTOP_BUILD_RUN_ID: ${{ github.run_id }}
         run: |
           cargo tauri build --bundles nsis
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
