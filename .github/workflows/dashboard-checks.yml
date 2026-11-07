@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - "public/**"
+      - "desktop/ui/**"
       - "src/**"
       - "server/**"
       - "tests/**"
@@ -42,3 +43,5 @@ jobs:
           node --input-type=module --check < src/bridge.js
       - name: Test live bridge free-tier behavior
         run: node --test tests/test_bridge_free_tier.mjs
+      - name: Verify shared Cloudflare and Windows interface system
+        run: node --test tests/test_unified_ui.mjs
