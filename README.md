@@ -158,3 +158,24 @@ The server protects plugin JARs by routing them through the existing Plugins pag
 World snapshots are produced only after a graceful Paper shutdown and checked with SHA-256. The **five newest** valid `minecraft-world` GitHub Actions artifacts are kept, with a maximum artifact lifetime of **90 days**. Older backups are cleaned up after the newly uploaded backup is listed by GitHub; cleanup cannot run when backup/upload fails. The run summary reports how much artifact storage was reclaimed. Backups can still expire if the server is stopped for a long time, so download important worlds off GitHub regularly.
 
 GitHub automatically disables scheduled workflows in a public repository after 60 days with no repository activity. This project intentionally does **not** generate dummy commits merely to evade inactivity checks. Use legitimate code/dependency maintenance and check GitHub's Actions page if scheduled recovery is disabled. GitHub-hosted runners should not be relied on as an always-on game-server host; these storage optimizations do not change GitHub's platform restrictions.
+
+
+## Numbered maintenance log (every 50 days)
+
+The [Minecraft maintenance log workflow](.github/workflows/maintenance-log.yml) checks whether 50 days have passed since the last actual maintenance report. Daily scheduled eligibility checks do **not** create Git commits, but a due run performs real validation and commits a numbered record to [maintenance/maintenance-log.md](maintenance/maintenance-log.md) and machine-readable results to `maintenance/status.json`.
+
+Example entries (illustrative, not actual test results):
+
+```text
+Maintenance #1 — YYYY-MM-DD
+Maintenance status: all good
+Checks passed: 7/7
+
+Maintenance #2 — YYYY-MM-DD
+Maintenance status: 1 resolved, 0 failing
+Fixed since last maintenance: Python syntax
+```
+
+Checks cover Python source syntax, Python tests, both dashboard scripts, Worker and bridge JavaScript syntax, and GitHub Actions workflow YAML. A passing check that failed in the previous report is marked *fixed since last maintenance*. This reports a verified recovery; it does **not** imply that automation repaired any code. New and continuing failures are recorded, and a failing maintenance run is marked unsuccessful **after** committing its report. Even repeated all-good runs get distinct numbered entries at the 50-day interval. Actual reports deliberately omit secrets and raw logs.
+
+You can initiate a manual check in **Actions → Minecraft maintenance log → Run workflow**. It creates a new entry even before 50 days have elapsed. To allow the workflow to push its report, repository Actions settings must permit `GITHUB_TOKEN` with contents write access and must not block GitHub Actions bot commits. A scheduled workflow might be disabled by GitHub's 60-day public-repository inactivity rule; generating reports is not a guarantee that scheduled workflows or continuous Minecraft hosting will remain available.
