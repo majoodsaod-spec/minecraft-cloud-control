@@ -636,7 +636,10 @@ fn direct_client() -> Result<reqwest::Client, String> {
 async fn direct_request(kind: &str, command: Option<Value>) -> Result<Value, String> {
     let token=secret(DIRECT_SECRET).map_err(|_|"Direct Paper needs a separate secret. Set MINECRAFT_DIRECT_TOKEN in GitHub Actions Secrets, then enter the exact same value under Connections → Direct Paper.".to_owned())?;
     if token.len()<8 {return Err("Direct control token must be at least 8 characters".into());}
-    let ip=direct_peer_ip()?;
+    // CLI peer discovery is a blocking OS process. Keep it off Tauri's
+    // async executor so frequent status checks cannot freeze other commands.
+    let ip=tokio::task::spawn_blocking(direct_peer_ip)
+        .await.map_err(|_|"NetBird peer lookup failed".to_owned())??;
     let url=format!("http://{ip}:8765/api/{kind}");
     let client=direct_client()?;
     let req=match command {
