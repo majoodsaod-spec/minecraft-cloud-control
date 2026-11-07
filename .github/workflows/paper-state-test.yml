@@ -124,7 +124,7 @@ jobs:
             exit 0
           fi
           private_ip="$(sudo netbird status --ipv4 2>/dev/null | tr -d '\r\n' | cut -d/ -f1)"
-          if ! [[ "$private_ip" =~ ^100\\.([6-9][0-9]|1[0-1][0-9]|12[0-7])\\.[0-9]+\\.[0-9]+$ ]]; then
+          if ! python -c 'import ipaddress,sys; ip=ipaddress.ip_address(sys.argv[1]); sys.exit(not(ip.version==4 and ip in ipaddress.ip_network("100.64.0.0/10")))' "$private_ip"; then
             # Strict IP validation happens again in Python's direct control.
             echo "::warning::NetBird private IP not ready; live direct control unavailable."
             exit 0
