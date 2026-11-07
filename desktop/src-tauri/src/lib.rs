@@ -460,9 +460,9 @@ mod netbird_lifecycle_tests {
     fn discovers_runner_from_netbird_table_and_details() {
         assert_eq!(runner_peer_id("minecraft-paper-42389453154.netbird.cloud"),Some(42389453154));
         assert_eq!(runner_peer_id("minecraft-paper-42389453154"),Some(42389453154));
-        assert_eq!(parse_peer_table("NAME IP STATUS CONN\\nminecraft-paper-42389453154.netbird.cloud 100.94.2.7 Connected Relayed\\n"),
+        assert_eq!(parse_peer_table("NAME IP STATUS CONN\nminecraft-paper-42389453154.netbird.cloud 100.94.2.7 Connected Relayed\n"),
             Some("100.94.2.7".to_owned()));
-        assert_eq!(parse_peer_details("Peers detail:\\n minecraft-paper-42389453154.netbird.cloud:\\n  NetBird IP: 100.94.2.7\\n  Status: Connected\\n"),
+        assert_eq!(parse_peer_details("Peers detail:\n minecraft-paper-42389453154.netbird.cloud:\n  NetBird IP: 100.94.2.7\n  Status: Connected\n"),
             Some("100.94.2.7".to_owned()));
     }
     #[test]
