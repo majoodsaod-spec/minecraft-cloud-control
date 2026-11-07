@@ -18,6 +18,7 @@ import zipfile
 
 from paper_lifecycle import DATA, OUTPUT, PREV, WORK, CONFIG, SKIP_NAMES, SKIP_FILES, digest, download_paper
 from runtime_bridge import LiveBridge
+from direct_control import DirectControl
 from managed_plugins import install_managed_plugins
 from geyser_setup import configure_geyser
 
@@ -180,6 +181,8 @@ def run(jar: Path) -> None:
     bridge=LiveBridge(DATA,os.environ.get("GITHUB_RUN_ID",str(int(time.time()))),
                       players,lock,log_lines,ready,send,bridge_restart,bridge_shutdown,observed,proc.pid)
     bridge.start()
+    direct=DirectControl(bridge)
+    direct.start()
     graceful = False
     try:
         if not ready.wait(180) or proc.poll() is not None:
@@ -287,6 +290,7 @@ def run(jar: Path) -> None:
             raise RuntimeError(f"Paper shutdown failed: {proc.returncode}")
         graceful = True
     finally:
+        direct.stop()
         if proc.poll() is None:
             try:
                 send("stop")
