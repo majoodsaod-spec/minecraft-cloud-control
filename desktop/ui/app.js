@@ -31,7 +31,6 @@ function connectedLive(){
   const live=state.cloud?.bridge?.status;
   return Boolean(live?.session&&live.ready&&Date.now()-(live.updatedAt||0)<45000);
 }
-function serverRun(){return (state.overview?.runs||[]).find(isServer&&undefined)||null}
 function latestServerRun(){return (state.overview?.runs||[]).find(r=>isServer(r))||null}
 function runRow(r,withCancel=false){
   const label=activeRun(r)?"Running":r.conclusion==="success"?"Successful":r.conclusion==="failure"?"Failed":r.conclusion||r.status||"Unknown";
