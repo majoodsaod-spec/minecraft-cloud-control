@@ -14,7 +14,11 @@ test("both apps load their shared design system after the original styles",()=>{
   assert.match(native, /style\.css.*?apple-unified\.css/s);
 });
 test("desktop and web use exactly the same base design rules",()=>{
-  assert.ok(webCss.startsWith(nativeCss),"Web may extend, but not diverge from, native base styles");
+  // The shared design system is identical; each platform may append its
+  // own components (Cloudflare page layout vs Windows Quick Update button).
+  const webCore=webCss.split("/* Cloudflare's legacy page shell")[0].trim();
+  const nativeCore=nativeCss.split("/* Direct GitHub in-app update affordance")[0].trim();
+  assert.equal(webCore,nativeCore,"Shared visual tokens and controls must match");
   for(const token of ["--mc-green:","--mc-surface:","--mc-ease:","--mc-fast:"]){
     assert.ok(webCss.includes(token)&&nativeCss.includes(token));
   }
