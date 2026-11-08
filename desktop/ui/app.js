@@ -8,7 +8,7 @@ const bytes=n=>!Number.isFinite(+n)?"—":(+n/1048576).toFixed(1)+" MB";
 const duration=s=>{s=Math.max(0,Math.floor(Number(s)||0));return [Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(x=>String(x).padStart(2,"0")).join(":");};
 const activeRun=r=>["in_progress","queued","waiting","requested","pending"].includes(r?.status);
 const isServer=r=>(r?.name||"").includes("Continuous Paper Minecraft Server")||(r?.path||"").includes("paper-state-test.yml");
-const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,cloudFetchedAt:0,netbirdAuto:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null)};
+const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,directStreamConnected:false,cloudFetchedAt:0,netbirdAuto:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null)};
 function flash(text){const box=$("#toast");box.textContent=text;box.classList.add("show");clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>box.classList.remove("show"),4300)}
 function btn(label,action="refresh",cls=""){return `<button class="btn ${cls}" data-action="${action}">${label}</button>`}
 function boxEmpty(title,body,icon="◇"){return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${body}</p></div>`}
@@ -151,6 +151,7 @@ async function loadDirect(quiet=true){
   // Fast UI refresh and the slower GitHub refresh used to launch overlapping
   // private requests every 4/12 seconds, especially while NetBird wakes an
   // idle peer. Share one in-flight probe instead.
+  if(state.directStreamConnected)return;
   if(pendingDirectStatus)return pendingDirectStatus;
   pendingDirectStatus=(async()=>{
     try{state.direct=await run("direct_status",{}, {quiet});state.directFetchedAt=Date.now();state.directError=null;}
@@ -354,6 +355,7 @@ async function startApp(){
       if(!next||typeof next!=="object"||!next.session)return;
       const previous=state.direct;
       state.direct=next;
+      state.directStreamConnected=true;
       state.directFetchedAt=Date.now();
       state.directError=null;
       const changes=JSON.stringify({
@@ -369,6 +371,7 @@ async function startApp(){
     });
     await listen("paper-live-disconnected",()=>{
       state.direct=null;
+      state.directStreamConnected=false;
       state.directFetchedAt=0;
       if(state.page==="console")updateConsoleOutput();
       if(["overview","connections"].includes(state.page)&&!editing())render();
@@ -518,7 +521,8 @@ async function pollLiveTelemetry(){
   if(document.visibilityState!=="visible"||livePollPending||state.busy)return;
   livePollPending=true;
   try{
-    if(!directOnline())await loadCloud(true);
+    if(state.directStreamConnected)return;
+    await loadCloud(true);
     if(state.page==="console")updateConsoleOutput();
     if(["overview","connections"].includes(state.page)&&!editing())render();
     tickLiveUI();
@@ -531,7 +535,7 @@ setInterval(async()=>{
   if(document.visibilityState!=="visible")return;
   // Periodic direct probes are a compatibility fallback for older runner
   // versions that have not yet received /api/events.
-  if(directOnline())return;
+  if(state.directStreamConnected)return;
   await loadDirect(true);
   if(state.page==="console")updateConsoleOutput();
   if(["overview","connections"].includes(state.page)&&!editing())render();
