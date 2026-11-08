@@ -64,11 +64,7 @@ class DirectControl:
                     return False
                 return True
 
-            def do_GET(self):
-                if not self.authorized():
-                    return
-                if self.path != "/api/status":
-                    return self.reply(404, {"error": "Unknown endpoint"})
+            def snapshot(self):
                 b = parent.bridge
                 with b.lock:
                     players = sorted(str(name)[:48] for name in b.players)[:100]
@@ -77,14 +73,54 @@ class DirectControl:
                 ready = b.ready.is_set()
                 uptime = max(0, int(time.monotonic() - b.started)) if ready else 0
                 empty_for = max(0, int(time.monotonic() - empty_since)) if empty_since is not None and not players else 0
-                self.reply(200, {
+                return {
                     "ready": ready, "phase": "running" if ready else "starting",
                     "session": b.session, "updatedAt": int(time.time() * 1000),
                     "uptime": uptime, "restartIn": max(0, 19800 - uptime),
                     "emptyFor": empty_for, "players": players, "logs": logs,
                     "memoryMiB": b._memory_mb(), "memoryLimitMiB": 8192,
                     "connection": "netbird",
-                })
+                }
+
+            def stream(self):
+                # Private, bearer-authenticated SSE. Emit immediately on a log,
+                # player, readiness or phase change, with a periodic telemetry
+                # sample. Never expose the endpoint on a public interface.
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache, no-transform")
+                self.send_header("Connection", "keep-alive")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                previous = None
+                last_sent = 0.0
+                try:
+                    while not parent.bridge.shutdown_event.is_set() and not parent.bridge.restart_event.is_set():
+                        snapshot = self.snapshot()
+                        # Uptime and timestamps change every second, but send
+                        # those only on heartbeat; changes to actual game data
+                        # should be delivered as soon as they are observed.
+                        content = {key: value for key, value in snapshot.items()
+                                   if key not in ("updatedAt", "uptime", "restartIn", "emptyFor", "memoryMiB")}
+                        now = time.monotonic()
+                        if content != previous or now - last_sent >= 1:
+                            event = ("data: " + json.dumps(snapshot, separators=(",", ":")) + "\n\n").encode("utf-8")
+                            self.wfile.write(event)
+                            self.wfile.flush()
+                            previous = content
+                            last_sent = now
+                        time.sleep(0.15)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                    return
+
+            def do_GET(self):
+                if not self.authorized():
+                    return
+                if self.path == "/api/events":
+                    return self.stream()
+                if self.path != "/api/status":
+                    return self.reply(404, {"error": "Unknown endpoint"})
+                self.reply(200, self.snapshot())
 
             def do_POST(self):
                 if not self.authorized():
