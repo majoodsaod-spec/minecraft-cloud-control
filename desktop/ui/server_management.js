@@ -159,12 +159,12 @@ function settingsControl(key,value){
 }
 function renderSettings(){
  const container=document.querySelector("#content");if(!container)return;
- const properties=state.settingData?.properties||{};
+ const properties={...(state.settingData?.defaults||{}),...(state.settingData?.properties||{})};
  const search=state.settingSearch.toLowerCase();
  const filtered=Object.entries(properties).filter(([k])=>k.toLowerCase().includes(search)||categoryOf(k).toLowerCase().includes(search));
  container.innerHTML='<div class="server-manager settings-page">'+
   '<div class="page-header"><div><div class="eyebrow">SERVER</div><h1>Server Settings</h1>'+
-  '<p>Edit the Minecraft properties used when Paper starts.</p></div>'+
+  '<p>Configure Minecraft server properties. Unset values show standard defaults.</p></div>'+
   '<div class="header-actions"><button class="btn" data-srv-action="reload-settings">Reload</button>'+
   '<button class="btn primary" data-srv-action="save-settings" '+(!state.settingData||state.settingSaving?'disabled':'')+'>Save settings</button></div></div>'+
   '<div class="notice"><strong>Restart required:</strong> changes are saved to GitHub and apply at the next Paper startup. They do not alter the running server or modify old world backups. Online mode remains enabled to protect player identities and inventories.</div>'+
@@ -195,7 +195,8 @@ async function saveSettings(){
      const status=document.querySelector("#settings-feedback");if(status)status.textContent="Invalid number for "+key;
      return;
    }
-   if(value!==String(state.settingData.properties[key]))edits[key]=value;
+   const baseline=state.settingData.properties[key]??state.settingData.defaults?.[key];
+   if(value!==String(baseline??""))edits[key]=value;
  }
  if(!Object.keys(edits).length){
   const status=document.querySelector("#settings-feedback");if(status)status.textContent="No changes to save.";
