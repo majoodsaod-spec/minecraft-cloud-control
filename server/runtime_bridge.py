@@ -5,6 +5,7 @@ Never includes the bridge token in console output.
 """
 from __future__ import annotations
 from collections import deque
+from modrinth_install import install_modrinth
 from pathlib import Path
 import base64
 import binascii
@@ -162,6 +163,13 @@ class LiveBridge:
         if kind=="shutdown":
             self.shutdown_event.set()
             return "Graceful shutdown requested; backup will upload before workflow exits"
+        if kind=="marketplace-install":
+            result=install_modrinth(self.data,args.get("projectId"),args.get("versionId"),args.get("kind"))
+            if result["kind"]=="datapack":
+                # Vanilla datapacks can be reloaded without restarting Paper.
+                self.send("minecraft:reload")
+                result["reloadRequested"]=True
+            return result
         if kind=="plugins-list":
             return [{"name":p.name,"bytes":p.stat().st_size} for p in (self.data/"plugins").glob("*.jar")][:100]
         if kind=="files-tree":
