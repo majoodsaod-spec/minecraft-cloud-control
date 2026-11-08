@@ -191,7 +191,32 @@ async fn server_settings_get()->Result<Value,String>{
         if line.starts_with('#'){continue;}
         if let Some((k,v))=line.split_once('='){values.insert(k.trim().to_owned(),json!(v.trim()));}
     }
-    Ok(json!({"properties":values,"sha":file["sha"]}))
+    // Display commonly supported Paper/vanilla options even when the
+    // repository currently relies on server defaults. These are UI defaults
+    // only; saving one setting must not write the entire list to GitHub.
+    let defaults=json!({
+        "allow-flight":"false","allow-nether":"true","broadcast-console-to-ops":"true",
+        "broadcast-rcon-to-ops":"true","debug":"false","difficulty":"easy",
+        "enable-command-block":"false","enable-jmx-monitoring":"false",
+        "enable-query":"false","enable-status":"true","enforce-secure-profile":"true",
+        "enforce-whitelist":"false","entity-broadcast-range-percentage":"100",
+        "force-gamemode":"false","function-permission-level":"2",
+        "gamemode":"survival","generate-structures":"true","generator-settings":"{}",
+        "hardcore":"false","hide-online-players":"false","level-name":"world",
+        "level-seed":"","level-type":"minecraft:normal","log-ips":"true",
+        "max-chained-neighbor-updates":"1000000","max-players":"20",
+        "max-tick-time":"60000","max-world-size":"29999984","motd":"A Minecraft Server",
+        "network-compression-threshold":"256","online-mode":"true",
+        "op-permission-level":"4","player-idle-timeout":"0",
+        "prevent-proxy-connections":"false","pvp":"true",
+        "rate-limit":"0","require-resource-pack":"false","resource-pack":"",
+        "resource-pack-prompt":"","resource-pack-sha1":"","server-ip":"",
+        "server-port":"25565","simulation-distance":"10","spawn-animals":"true",
+        "spawn-monsters":"true","spawn-npcs":"true","spawn-protection":"16",
+        "sync-chunk-writes":"true","use-native-transport":"true",
+        "view-distance":"10","white-list":"false"
+    });
+    Ok(json!({"properties":values,"defaults":defaults,"sha":file["sha"]}))
 }
 #[tauri::command]
 async fn server_settings_save(properties:Value,sha:String)->Result<Value,String>{
