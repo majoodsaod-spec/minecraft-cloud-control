@@ -5,6 +5,8 @@ use std::sync::{Mutex, OnceLock};
 use tauri::{Manager, Emitter};
 
 
+include!("server_files.rs");
+
 const REPO: &str = "majoodsaod-spec/minecraft-cloud-control";
 const SERVER_WORKFLOW: &str = "paper-state-test.yml";
 const GITHUB_SECRET: &str = "github-token";
@@ -1082,6 +1084,8 @@ pub fn run() {
             connect_github,disconnect_github,github_status,github_overview,
             github_workflows,github_runs,github_dispatch,github_cancel,github_jobs,github_job_log,
             github_file,github_save_file,github_download_backup,
+            server_files_pending,server_files_stage,server_files_unstage,
+            server_files_list,server_files_read,server_settings_get,server_settings_save,
             desktop_check_update,desktop_install_update,
             configure_cloudflare,cloudflare_status,cloudflare_command,cloudflare_console,
             direct_configure,direct_peer_config,direct_clear_peer,direct_status,direct_start_stream,direct_command,
