@@ -224,3 +224,71 @@ async fn server_settings_save(properties:Value,sha:String)->Result<Value,String>
         "content":encode_content(&output)}))).await?;
     Ok(json!({"ok":true,"nextSession":true}))
 }
+
+
+const PENDING_MODRINTH:&str="server/pending-modrinth.json";
+async fn modrinth_queue_manifest()->Result<(Value,String),String>{
+    let file=github(&format!("/contents/{PENDING_MODRINTH}?ref=main"),reqwest::Method::GET,None).await?;
+    let value=serde_json::from_str::<Value>(&decode_content(&file)?)
+        .map_err(|_|"Invalid pending Modrinth queue")?;
+    if !value.is_object(){return Err("Invalid pending Modrinth queue".into())}
+    Ok((value,file["sha"].as_str().ok_or("Missing queue revision")?.to_owned()))
+}
+#[tauri::command]
+async fn modrinth_queue_list()->Result<Value,String>{
+    Ok(modrinth_queue_manifest().await?.0)
+}
+#[tauri::command]
+async fn modrinth_queue_add(project_id:String,version_id:String,kind:String,title:String)->Result<Value,String>{
+    let valid=|id:&str| id.len()>=3&&id.len()<=32&&id.chars().all(|c|c.is_ascii_alphanumeric());
+    if !valid(&project_id)||!valid(&version_id)||!["plugin","datapack"].contains(&kind.as_str())
+        || title.len()>160||title.chars().any(char::is_control) {
+        return Err("Invalid Modrinth installation request".into());
+    }
+    // Verify the remote project and version before allowing persistent staging.
+    let project=http().get(format!("https://api.modrinth.com/v2/project/{project_id}"))
+        .send().await.map_err(|_|"Could not verify Modrinth project")?;
+    if !project.status().is_success(){return Err("Modrinth project not found".into())}
+    let project=project.json::<Value>().await.map_err(|_|"Invalid Modrinth project response")?;
+    let version=http().get(format!("https://api.modrinth.com/v2/version/{version_id}"))
+        .send().await.map_err(|_|"Could not verify Modrinth release")?;
+    if !version.status().is_success(){return Err("Modrinth release not found".into())}
+    let release=version.json::<Value>().await.map_err(|_|"Invalid Modrinth release response")?;
+    if release["project_id"]!=project["id"]{return Err("Release belongs to a different project".into())}
+    let compatible=release["game_versions"].as_array()
+        .map(|a|a.iter().any(|v|v.as_str()==Some("26.3"))).unwrap_or(false);
+    let loader=release["loaders"].as_array().map(|a|a.iter().any(|v|v.as_str()
+        .map(|l|if kind=="plugin"{["paper","spigot","bukkit","purpur"].contains(&l)}else{l=="datapack"})
+        .unwrap_or(false))).unwrap_or(false);
+    if !compatible||!loader{return Err("This release is not compatible with Paper 26.3".into())}
+    if release["dependencies"].as_array().map(|a|a.iter().any(|v|
+        v["dependency_type"].as_str()==Some("required"))).unwrap_or(false){
+        return Err("Required dependencies are not installed automatically. Install them first.".into())
+    }
+    let (mut manifest,sha)=modrinth_queue_manifest().await?;
+    let map=manifest.as_object_mut().ok_or("Invalid install queue")?;
+    if map.len()>=100&&!map.contains_key(&project_id){return Err("Install queue is full".into())}
+    map.insert(project_id.clone(),json!({"versionId":version_id,"kind":kind,"title":title}));
+    let data=serde_json::to_string_pretty(&manifest).map_err(|_|"Could not encode queued installs")?;
+    github(&format!("/contents/{PENDING_MODRINTH}"),reqwest::Method::PUT,Some(json!({
+        "branch":"main","sha":sha,
+        "message":"Queue Modrinth content for next Paper session",
+        "content":encode_content(&(data+"\n"))
+    }))).await?;
+    Ok(json!({"queued":true,"projectId":project_id,"kind":kind}))
+}
+#[tauri::command]
+async fn modrinth_queue_remove(project_id:String)->Result<Value,String>{
+    if project_id.len()<3||project_id.len()>32||!project_id.chars().all(|c|c.is_ascii_alphanumeric()){
+        return Err("Invalid Modrinth project".into())
+    }
+    let (mut manifest,sha)=modrinth_queue_manifest().await?;
+    manifest.as_object_mut().ok_or("Invalid queue")?.remove(&project_id);
+    let data=serde_json::to_string_pretty(&manifest).map_err(|_|"Could not encode queue")?;
+    github(&format!("/contents/{PENDING_MODRINTH}"),reqwest::Method::PUT,Some(json!({
+        "branch":"main","sha":sha,
+        "message":"Remove pending Modrinth content",
+        "content":encode_content(&(data+"\n"))
+    }))).await?;
+    Ok(json!({"removed":true,"projectId":project_id}))
+}
