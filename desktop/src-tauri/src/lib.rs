@@ -840,6 +840,18 @@ async fn direct_request(kind: &str, command: Option<Value>) -> Result<Value, Str
     Ok(body)
 }
 #[tauri::command]
+fn direct_peer_config() -> Value {
+    let saved=secret(DIRECT_PEER).unwrap_or_default();
+    json!({"manual":!saved.is_empty(),"peerIp":saved})
+}
+#[tauri::command]
+fn direct_clear_peer() -> Result<Value, String> {
+    // Revert to active-run discovery without requiring the user to re-enter
+    // their separately stored direct-control token.
+    remove_secret(DIRECT_PEER)?;
+    Ok(json!({"manual":false,"peerIp":""}))
+}
+#[tauri::command]
 fn direct_configure(token: String, peer_ip: String) -> Result<(), String> {
     let trimmed=token.trim();
     if trimmed.len()<8 || trimmed.len()>512 {
@@ -1028,7 +1040,7 @@ pub fn run() {
             github_file,github_save_file,github_download_backup,
             desktop_check_update,desktop_install_update,
             configure_cloudflare,cloudflare_status,cloudflare_command,cloudflare_console,
-            direct_configure,direct_status,direct_start_stream,direct_command,
+            direct_configure,direct_peer_config,direct_clear_peer,direct_status,direct_start_stream,direct_command,
             modrinth_search,modrinth_versions,
             netbird_auto_status,netbird_set_auto
         ])
