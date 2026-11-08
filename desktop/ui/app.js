@@ -115,6 +115,32 @@ async function quickUpdate(){
     syncUpdateButton();
   }
 }
+// One monotonic, local clock per Paper session. Reconnects must not rewind.
+const liveClock={session:null,uptimeBase:0,emptyBase:0,at:0,players:0,lastUptime:0,lastEmpty:0};
+function observeLiveClock(sample,receivedAt=Date.now()){
+  if(!sample?.session||!sample.ready)return;
+  const fresh=liveClock.session!==sample.session;
+  const uptime=Math.max(0,Math.floor(Number(sample.uptime)||0));
+  const empty=Math.max(0,Math.floor(Number(sample.emptyFor)||0));
+  const players=Array.isArray(sample.players)?sample.players.length:0;
+  if(fresh){
+    Object.assign(liveClock,{session:sample.session,uptimeBase:uptime,emptyBase:players?0:empty,at:receivedAt,players,lastUptime:uptime,lastEmpty:players?0:empty});
+    return;
+  }
+  const elapsed=Math.max(0,Math.floor((receivedAt-liveClock.at)/1000));
+  liveClock.uptimeBase=Math.max(uptime,liveClock.uptimeBase+elapsed,liveClock.lastUptime);
+  liveClock.lastUptime=liveClock.uptimeBase;
+  if(players!==liveClock.players){
+    liveClock.emptyBase=players?0:empty;
+    liveClock.lastEmpty=liveClock.emptyBase;
+  }else if(!players){
+    liveClock.emptyBase=Math.max(empty,liveClock.emptyBase+elapsed,liveClock.lastEmpty);
+    liveClock.lastEmpty=liveClock.emptyBase;
+  }else{
+    liveClock.emptyBase=0;liveClock.lastEmpty=0;
+  }
+  liveClock.players=players;liveClock.at=receivedAt;
+}
 function directOnline(){
   const d=state.direct;
   return Boolean(d?.session&&d.ready&&Date.now()-state.directFetchedAt<15000);
@@ -123,25 +149,21 @@ function currentPaper(){
   return directOnline()?state.direct:state.cloud?.bridge?.status||{};
 }
 function liveSampleAge(){
-  // Use the local time when telemetry was received: runner and desktop clocks
-  // can differ, so remote timestamps are not safe for elapsed-time interpolation.
   const received=directOnline()?state.directFetchedAt:state.cloudFetchedAt;
   return received?Math.max(0,(Date.now()-received)/1000):0;
 }
 function interpolatedPaperSeconds(field){
-  const live=currentPaper();
-  const baseline=Number(live[field]||0);
-  if(!connectedLive())return null;
-  if(field==="emptyFor"&&(live.players||[]).length)return 0;
-  return Math.max(0,baseline+liveSampleAge());
+  if(!liveClock.session)return connectedLive()?0:null;
+  const elapsed=Math.max(0,Math.floor((Date.now()-liveClock.at)/1000));
+  return field==="emptyFor"?(liveClock.players?0:liveClock.emptyBase+elapsed):liveClock.uptimeBase+elapsed;
 }
 function tickLiveUI(){
   if(document.visibilityState!=="visible")return;
   const uptime=document.querySelector('[data-live="uptime"]');
   const empty=document.querySelector('[data-live="empty"]');
   const runner=document.querySelector('[data-live="runner"]');
-  if(uptime)uptime.textContent=connectedLive()?duration(interpolatedPaperSeconds("uptime")):"—";
-  if(empty)empty.textContent=connectedLive()?duration(interpolatedPaperSeconds("emptyFor")):"—";
+  if(uptime)uptime.textContent=liveClock.session?duration(interpolatedPaperSeconds("uptime")):"—";
+  if(empty)empty.textContent=liveClock.session?duration(interpolatedPaperSeconds("emptyFor")):"—";
   if(runner){
     const main=latestServerRun();
     const started=main&&(main.run_started_at||main.created_at);
@@ -196,8 +218,8 @@ async function loadDirect(quiet=true){
   if(state.directStreamConnected)return;
   if(pendingDirectStatus)return pendingDirectStatus;
   pendingDirectStatus=(async()=>{
-    try{state.direct=await run("direct_status",{}, {quiet});state.directFetchedAt=Date.now();state.directError=null;}
-    catch(err){state.direct=null;state.directFetchedAt=0;state.directError=errorText(err);}
+    try{state.direct=await run("direct_status",{}, {quiet});state.directFetchedAt=Date.now();state.directError=null;observeLiveClock(state.direct,state.directFetchedAt);}
+    catch(err){state.directError=errorText(err);state.directStreamConnected=false;}
   })();
   try{return await pendingDirectStatus;}
   finally{pendingDirectStatus=null;}
@@ -228,8 +250,8 @@ function drawOverview(){
   const hero=`<div class="hero"><div class="hero-top"><div><div class="hero-label">YOUR MINECRAFT WORLD</div><div class="hero-title">${esc(status)}</div></div>${statePill}</div><div class="hero-desc">${desc}</div><div class="hero-actions">${btn("▶ Start server","start-server","primary")} ${btn("↻ Safe restart","restart-server")} ${btn("■ Save & stop","stop-server","danger")} ${main?btn("◷ View Minecraft logs","server-logs","flat"):""}</div></div>`;
   const stats=`<div class="stats">
    ${stat("Online players",online?(live.players||[]).length:"—",online?"Connected to Paper":"Live connection required","♙")}
-   ${stat("Server uptime",online?duration(interpolatedPaperSeconds("uptime")):"—","Current runner session","◷","uptime")}
-   ${stat("Empty time",online?duration(interpolatedPaperSeconds("emptyFor")):"—","Restart after 1 hour empty","⌛","empty")}
+   ${stat("Server uptime",liveClock.session?duration(interpolatedPaperSeconds("uptime")):"—","Current runner session","◷","uptime")}
+   ${stat("Empty time",liveClock.session?duration(interpolatedPaperSeconds("emptyFor")):"—","Restart after 1 hour empty","⌛","empty")}
    ${stat("Memory used",online&&live.memoryMiB!=null?Number(live.memoryMiB).toFixed(0)+" MB":"—","Paper Java process","▦")}
   </div>`;
   const runnerCard=main?panel("GitHub runner · independent status",`<div class="list-stat"><span>Latest Minecraft run</span><strong>#${esc(main.run_number)}</strong></div><div class="list-stat"><span>Workflow status</span><strong>${esc(main.conclusion||main.status||"unknown")}</strong></div><div class="list-stat"><span>Workflow elapsed (approx.)</span><strong data-live="runner">${runnerElapsed!==null?duration(runnerElapsed):"—"}</strong></div><p class="field-tip" style="margin-top:14px">Workflow elapsed is estimated from GitHub timestamps and may include queue time; it is not Paper uptime. Minecraft player and memory metrics require a functioning live bridge.</p><button class="btn small flat" data-action="server-logs">View GitHub job logs</button>`):"";
@@ -360,7 +382,7 @@ async function loadOverview(quiet=false){
   catch(e){if(!quiet)flash(errorText(e));}
 }
 async function loadCloud(quiet=true){
-  try{state.cloud=await run("cloudflare_status",{}, {quiet});state.cloudFetchedAt=Date.now();state.cloudError=null;}
+  try{state.cloud=await run("cloudflare_status",{}, {quiet});state.cloudFetchedAt=Date.now();state.cloudError=null;observeLiveClock(state.cloud?.bridge?.status,state.cloudFetchedAt);}
   catch(e){state.cloudError=errorText(e);state.cloud=null;state.cloudFetchedAt=0;}
 }
 async function loadGithubServerLog(quiet=true){
@@ -410,6 +432,7 @@ async function startApp(){
       state.directStreamConnected=true;
       state.directFetchedAt=Date.now();
       state.directError=null;
+      observeLiveClock(next,state.directFetchedAt);
       const changes=JSON.stringify({
         ready:previous?.ready,session:previous?.session,players:previous?.players,
         phase:previous?.phase,memoryMiB:previous?.memoryMiB
@@ -422,9 +445,8 @@ async function startApp(){
       tickLiveUI();
     });
     await listen("paper-live-disconnected",()=>{
-      state.direct=null;
       state.directStreamConnected=false;
-      state.directFetchedAt=0;
+      // Preserve last known telemetry and the running clock through reconnects.
       if(state.page==="console")updateConsoleOutput();
       if(["overview","connections"].includes(state.page)&&!editing())render();
     });
