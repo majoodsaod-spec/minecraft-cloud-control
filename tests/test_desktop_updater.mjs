@@ -151,3 +151,14 @@ test("Marketplace still installs verified files onto the live Paper server",()=>
   assert.match(ui,/case "market-restart"/);
   assert.match(market,/state\.version !== "26\.3"/);
 });
+
+test("a stored NetBird manual override is visible and can be cleared without re-entering secrets",()=>{
+  assert.match(rust,/fn direct_peer_config\(\)/);
+  assert.match(rust,/fn direct_clear_peer\(\)/);
+  assert.match(rust,/remove_secret\(DIRECT_PEER\)\?/);
+  assert.match(rust,/direct_configure,direct_peer_config,direct_clear_peer/);
+  assert.match(ui,/case "clear-direct-peer":/);
+  assert.match(ui,/data-action="clear-direct-peer"/);
+  assert.match(ui,/state\.directPeerConfig\.peerIp/);
+  assert.match(ui,/await loadDirectPeerConfig\(\)/);
+});
