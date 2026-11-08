@@ -200,3 +200,17 @@ h1,h2,h3,.server-title,.page-header h1,.hero-title{color:#23343b;letter-spacing:
   .quick-update-control::after{content:"↻";font-size:17px}
   .quick-update-control .update-indicator:not([hidden]){position:absolute;margin:-28px 0 0 24px}
 }
+
+/* Native Modrinth marketplace. Install buttons operate on the remote Paper
+   runner; no local file chooser or Windows download is involved. */
+.mc-market-list{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.mc-market-item{display:flex;align-items:center;justify-content:space-between;gap:20px;
+  background:#fbfdfc;border:1px solid #e1ebe7;border-radius:13px;padding:16px 18px}
+.mc-market-info{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}
+.mc-market-info strong{font-size:14px;color:#263d37;letter-spacing:-.2px}
+.mc-market-info p{font-size:12px;line-height:1.5;color:#657976;margin:7px 0 0}
+.mc-market-item .btn{flex-shrink:0;min-width:126px}
+#marketSearchForm{display:flex;gap:10px}
+#marketSearchForm input{flex:1;min-width:0}
+@media(max-width:650px){.mc-market-item{align-items:flex-start;flex-direction:column}
+  .mc-market-item .btn{width:100%}}
