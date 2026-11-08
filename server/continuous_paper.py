@@ -22,6 +22,7 @@ from direct_control import DirectControl
 from managed_plugins import install_managed_plugins
 from geyser_setup import configure_geyser
 from pending_files import apply_pending
+from pending_modrinth import apply_modrinth_queue
 
 IDLE_SECONDS = 3600
 MAX_SECONDS = 5 * 3600 + 30 * 60
@@ -329,6 +330,7 @@ def main() -> None:
     DATA.mkdir(parents=True, exist_ok=True)
     restore_snapshot()
     apply_pending(DATA, WORK.parent / "server" / "pending-files.json")
+    apply_modrinth_queue(DATA, WORK.parent / "server" / "pending-modrinth.json")
     config = json.loads(CONFIG.read_text())
     jar = download_paper(config["minecraft_version"])
     run(jar)
