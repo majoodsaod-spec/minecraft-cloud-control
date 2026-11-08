@@ -118,8 +118,13 @@ def synchronize_plugins() -> None:
     enabled = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
     source = {p.name: p for p in repo_plugins.glob("*.jar")
               if enabled.get(p.name, True)} if repo_plugins.exists() else {}
+    # Preserve jars installed by the in-app Modrinth marketplace; they live
+    # in verified world snapshots, not the public source repository.
+    # Managed jars keep their own installation/disable logic below.
     for old in installed.glob("*.jar"):
-        if old.name not in source:
+        if old.name.startswith("modrinth-"):
+            continue
+        if old.name not in source and old.name in enabled and enabled.get(old.name) is False:
             old.unlink()
     for name, jar in source.items():
         shutil.copyfile(jar, installed / name)
