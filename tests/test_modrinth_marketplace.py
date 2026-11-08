@@ -1,5 +1,6 @@
 """Regression tests: Modrinth files are downloaded on the runner, not the PC."""
 import hashlib
+import json
 import io
 from pathlib import Path
 import sys
@@ -10,6 +11,7 @@ import zipfile
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"server"))
 import modrinth_install as store
+import pending_modrinth as queue
 
 
 class FakeDownload(io.BytesIO):
@@ -69,6 +71,38 @@ class MarketplaceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
                 store.install_modrinth(Path(tmp),"../wrong","Version1","plugin")
+
+class OfflineQueueTests(unittest.TestCase):
+    def test_pending_plugins_and_datapacks_apply_into_restored_world(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            manifest=root/"pending-modrinth.json"
+            manifest.write_text(json.dumps({
+                "Proj123":{"versionId":"Ver123","kind":"plugin","title":"Example"},
+                "Proj456":{"versionId":"Ver456","kind":"datapack","title":"Pack"}
+            }))
+            with patch.object(queue,"install_modrinth",side_effect=[
+                {"installed":True,"kind":"plugin"},{"installed":True,"kind":"datapack"}
+            ]) as installer:
+                result=queue.apply_modrinth_queue(root/"paper",manifest)
+            self.assertEqual(len(result),2)
+            self.assertEqual(installer.call_count,2)
+            self.assertEqual(installer.call_args_list[0].args[1:],("Proj123","Ver123","plugin"))
+            self.assertEqual(installer.call_args_list[1].args[1:],("Proj456","Ver456","datapack"))
+
+    def test_invalid_or_unsafe_queue_is_rejected_before_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            manifest=root/"pending-modrinth.json"
+            manifest.write_text(json.dumps({"../bad":{"versionId":"Ver123","kind":"plugin"}}))
+            with self.assertRaises(ValueError):
+                queue.apply_modrinth_queue(root,manifest)
+
+    def test_offline_queue_runs_after_world_restore(self):
+        source=(Path(__file__).resolve().parents[1]/"server"/"continuous_paper.py").read_text()
+        start=source.index("def main()")
+        self.assertLess(source.index("    restore_snapshot()",start),
+                        source.index("    apply_modrinth_queue(",start))
 
 if __name__=="__main__":
     unittest.main()
