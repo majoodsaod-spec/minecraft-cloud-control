@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::{Mutex, OnceLock};
-use tauri::Manager;
+use tauri::{Manager, Emitter};
 
 
 const REPO: &str = "majoodsaod-spec/minecraft-cloud-control";
@@ -763,6 +763,59 @@ fn direct_configure(token: String, peer_ip: String) -> Result<(), String> {
     else {save_secret(DIRECT_PEER,peer)?;}
     Ok(())
 }
+// A single native event stream keeps the WebView free of CORS, credentials,
+// and the overhead of invoking direct_status several times per second.
+static STREAM_STARTED: OnceLock<()> = OnceLock::new();
+#[tauri::command]
+async fn direct_start_stream(app: tauri::AppHandle) -> Result<(), String> {
+    if STREAM_STARTED.set(()).is_err() { return Ok(()); }
+    tauri::async_runtime::spawn(async move {
+        let client = match reqwest::Client::builder().no_proxy()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .build() {
+            Ok(client) => client,
+            Err(_) => return,
+        };
+        loop {
+            // Token and peer selection can change in Connections. Rediscover
+            // on reconnect without ever sending credentials to the frontend.
+            let token = secret(DIRECT_SECRET);
+            let peer = tokio::task::spawn_blocking(direct_peer_ip).await;
+            if let (Ok(token), Ok(Ok(ip))) = (token, peer) {
+                if token.len() >= 8 {
+                    let endpoint = format!("http://{ip}:8765/api/events");
+                    if let Ok(response) = client.get(&endpoint).bearer_auth(token).send().await {
+                        if response.status().is_success() {
+                            let mut stream = response.bytes_stream();
+                            let mut buffer = String::new();
+                            while let Some(chunk) = stream.next().await {
+                                match chunk {
+                                    Ok(bytes) => {
+                                        buffer.push_str(&String::from_utf8_lossy(&bytes));
+                                        // Bound the untrusted stream, and never emit malformed JSON.
+                                        if buffer.len() > 1_048_576 { break; }
+                                        while let Some(end) = buffer.find("\n\n") {
+                                            let frame: String = buffer.drain(..end+2).collect();
+                                            if let Some(data) = frame.strip_prefix("data: ") {
+                                                if let Ok(value) = serde_json::from_str::<Value>(data.trim()) {
+                                                    let _ = app.emit("paper-live-status", value);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let _ = app.emit("paper-live-disconnected", json!({}));
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        }
+    });
+    Ok(())
+}
 #[tauri::command]
 async fn direct_status() -> Result<Value, String> { direct_request("status",None).await }
 #[tauri::command]
@@ -800,7 +853,7 @@ pub fn run() {
             github_file,github_save_file,github_download_backup,
             desktop_check_update,desktop_install_update,
             configure_cloudflare,cloudflare_status,cloudflare_command,cloudflare_console,
-            direct_configure,direct_status,direct_command,
+            direct_configure,direct_status,direct_start_stream,direct_command,
             netbird_auto_status,netbird_set_auto
         ])
         .build(tauri::generate_context!())
