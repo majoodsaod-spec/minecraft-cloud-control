@@ -382,7 +382,7 @@ async function loadOverview(quiet=false){
   catch(e){if(!quiet)flash(errorText(e));}
 }
 async function loadCloud(quiet=true){
-  try{state.cloud=await run("cloudflare_status",{}, {quiet});state.cloudFetchedAt=Date.now();state.cloudError=null;observeLiveClock(state.cloud?.bridge?.status,state.cloudFetchedAt);}
+  try{state.cloud=await run("cloudflare_status",{}, {quiet});state.cloudFetchedAt=Date.now();state.cloudError=null;if(!directOnline())observeLiveClock(state.cloud?.bridge?.status,state.cloudFetchedAt);}
   catch(e){state.cloudError=errorText(e);state.cloud=null;state.cloudFetchedAt=0;}
 }
 async function loadGithubServerLog(quiet=true){
@@ -448,7 +448,9 @@ async function startApp(){
       state.directStreamConnected=false;
       // Preserve last known telemetry and the running clock through reconnects.
       if(state.page==="console")updateConsoleOutput();
-      if(["overview","connections"].includes(state.page)&&!editing())render();
+      // A transient transport loss is not a Paper restart. Keep the existing
+      // view and timer stable; background fallback checks connection health.
+      tickLiveUI();
     });
     await invoke("direct_start_stream");
   }catch(error){state.directError=errorText(error);}
