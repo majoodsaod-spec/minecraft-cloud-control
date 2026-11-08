@@ -9,6 +9,8 @@ const rust=read("desktop/src-tauri/src/lib.rs");
 const build=read("desktop/src-tauri/build.rs");
 const workflow=read(".github/workflows/build-windows.yml");
 const config=JSON.parse(read("desktop/src-tauri/tauri.conf.json"));
+const market=read("desktop/ui/marketplace.js");
+const marketStyle=read("desktop/ui/marketplace.css");
 
 test("Quick Update gives immediate visible feedback and installs in one interaction",()=>{
   assert.match(ui,/case "check-update":return quickUpdate\(\)/);
@@ -117,4 +119,33 @@ test("NetBird connection ownership persists while the daemon completes startup",
   assert.match(rust,/state\.connected_by_app=true;\s*for _ in 0\.\.12/);
   assert.match(rust,/let mut state=ownership\.lock\(\)/);
   assert.match(rust,/fn disconnect_owned_netbird/);
+});
+
+test("Modrinth discovery loads popular projects and offers real browsing controls",()=>{
+  assert.doesNotThrow(()=>new Function(market));
+  assert.match(html,/marketplace\.js/);
+  assert.match(html,/marketplace\.css/);
+  assert.match(ui,/McMarketplace\.ensureLoaded\(\)/);
+  assert.match(market,/sort:\s*"downloads"/);
+  assert.match(market,/version:\s*"26\.3"/);
+  assert.match(market,/data-market-action="category"/);
+  assert.match(market,/data-market-action="loader"/);
+  assert.match(market,/data-market-action="previous"/);
+  assert.match(market,/data-market-action="next"/);
+  assert.match(market,/icon_url/);
+  assert.match(market,/date_modified/);
+  assert.match(market,/state\.hits\.map\(card\)/);
+  assert.match(rust,/const CATEGORIES:/);
+  assert.match(rust,/const SORTS:/);
+  assert.match(rust,/offset: u32/);
+  assert.match(marketStyle,/\.mc-discover-layout/);
+  assert.match(config.app.security.csp,/https:\/\/cdn\.modrinth\.com/);
+});
+
+test("Marketplace still installs verified files onto the live Paper server",()=>{
+  assert.match(market,/invoke\("modrinth_versions"/);
+  assert.match(market,/invoke\("direct_command"/);
+  assert.match(market,/kind: "marketplace-install"/);
+  assert.match(ui,/case "market-restart"/);
+  assert.match(market,/state\.version !== "26\.3"/);
 });
