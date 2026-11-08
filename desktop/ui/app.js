@@ -144,6 +144,11 @@ function updateConsoleOutput(){
   if(state.page!=="console")return;
   const terminal=$("#terminal");
   if(!terminal)return;
+  const transport=$("#consoleTransport");
+  if(transport){
+    const mode=consoleTransport();
+    if(transport.textContent!==mode)transport.textContent=mode;
+  }
   const online=connectedLive(),logs=currentPaper().logs||[];
   const githubFallback=!online&&state.github.connected;
   const content=online&&logs.length?logs.map(line=>{
@@ -236,6 +241,12 @@ function drawWorkflows(){
   +panel("Available workflows",items)
   +panel("Recent runs",runs.length?`<div class="run-list">${runs.slice(0,20).map(r=>runRow(r,true)).join("")}</div>`:boxEmpty("No workflow runs","Workflow activity will appear here once connected.","◷"),pill(runs.length+" loaded runs"));
 }
+function consoleTransport(){
+  if(state.directStreamConnected&&directOnline())return "● LIVE STREAM · NetBird · Low latency";
+  if(directOnline())return "● Direct NetBird polling · Stream unavailable";
+  if(connectedLive())return "● Cloudflare polling · Typically 2–4 second delay";
+  return "○ Live connection unavailable";
+}
 function drawConsole(){
   const online=connectedLive(),logs=currentPaper().logs||[];
   const githubLogs=state.githubLog||"";
@@ -246,7 +257,7 @@ function drawConsole(){
   }).join(""):githubFallback&&githubLogs?`<span class="dim">GitHub Actions logs (may be delayed; read-only)</span>\n${esc(githubLogs)}`:`<span class="dim">${esc(state.githubLogError||"No Paper live console. GitHub job logs are available below when GitHub publishes them.")}</span>`;
   $("#content").innerHTML=header("LIVE MANAGEMENT","Console","Your Paper server's latest output, securely relayed when the live bridge is available.",btn("↻ Refresh","refresh","flat"))
    +(online?notice(directOnline()?"● Direct NetBird connection online. Console works without Cloudflare.":"● Cloudflare bridge online — console commands are sent to Paper.",true):notice(githubFallback?"GitHub read-only log fallback is active. These logs may be delayed or unavailable during an active job. GitHub does not support sending Paper console commands.":"The live bridge is offline. Connect GitHub to inspect workflow logs. Do not force-cancel a running Minecraft job."))
-   +panel(online?"Paper live console":"GitHub Actions · read-only job logs",`<div class="header-actions" style="justify-content:flex-start;margin-bottom:12px"><button class="btn small flat" data-action="server-logs" ${githubFallback?"":"disabled"}>↻ Load GitHub logs</button><span class="field-tip">${esc(state.githubLogInfo||"GitHub job output is not a direct Paper connection")}</span></div><div class="console" id="terminal">${lines}</div><form id="consoleForm" class="console-form"><input id="commandText" placeholder="Enter a Paper console command…" autocomplete="off" aria-label="Paper console command" ${online?"":"disabled"}><button class="btn primary" ${online?"":"disabled"}>Send ↗</button></form>`);
+   +panel(online?"Paper live console":"GitHub Actions · read-only job logs",`<p class="field-tip" id="consoleTransport" role="status" style="margin:0 0 12px">${esc(consoleTransport())}</p><div class="header-actions" style="justify-content:flex-start;margin-bottom:12px"><button class="btn small flat" data-action="server-logs" ${githubFallback?"":"disabled"}>↻ Load GitHub logs</button><span class="field-tip">${esc(state.githubLogInfo||"GitHub job output is not a direct Paper connection")}</span></div><div class="console" id="terminal">${lines}</div><form id="consoleForm" class="console-form"><input id="commandText" placeholder="Enter a Paper console command…" autocomplete="off" aria-label="Paper console command" ${online?"":"disabled"}><button class="btn primary" ${online?"":"disabled"}>Send ↗</button></form>`);
   const term=$("#terminal");term.scrollTop=term.scrollHeight;
 }
 function drawFiles(){
