@@ -489,13 +489,22 @@ async function pollLiveTelemetry(){
   if(document.visibilityState!=="visible"||livePollPending||state.busy)return;
   livePollPending=true;
   try{
-    await Promise.all([loadCloud(true),loadDirect(true)]);
+    await loadCloud(true);
     if(state.page==="console")updateConsoleOutput();
     if(["overview","connections"].includes(state.page)&&!editing())render();
     tickLiveUI();
   }finally{livePollPending=false;}
 }
 setInterval(pollLiveTelemetry,2000);
+// Direct NetBird probes have a longer timeout, so keep them independent of
+// Cloudflare polling. The single-flight guard in loadDirect prevents overlap.
+setInterval(async()=>{
+  if(document.visibilityState!=="visible")return;
+  await loadDirect(true);
+  if(state.page==="console")updateConsoleOutput();
+  if(["overview","connections"].includes(state.page)&&!editing())render();
+  tickLiveUI();
+},4000);
 // GitHub metadata and backups need much less frequent refreshes.
 setInterval(()=>{if(document.visibilityState==="visible")refresh(true)},30000);
 document.addEventListener("visibilitychange",()=>{
