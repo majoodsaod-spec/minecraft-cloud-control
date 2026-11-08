@@ -1,0 +1,13 @@
+{
+  "checks": {
+    "Bridge JavaScript": true,
+    "Dashboard JavaScript": true,
+    "GitHub workflow YAML": true,
+    "Live dashboard JavaScript": true,
+    "Python syntax": true,
+    "Python unit tests": true,
+    "Worker JavaScript": true
+  },
+  "last_run": "2026-11-08",
+  "number": 1
+}
