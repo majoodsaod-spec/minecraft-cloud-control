@@ -5,7 +5,10 @@ Never includes the bridge token in console output.
 """
 from __future__ import annotations
 from collections import deque
-from modrinth_install import install_modrinth
+try:
+    from .modrinth_install import install_modrinth
+except ImportError:  # Launched as python server/continuous_paper.py
+    from modrinth_install import install_modrinth
 from pathlib import Path
 import base64
 import binascii
