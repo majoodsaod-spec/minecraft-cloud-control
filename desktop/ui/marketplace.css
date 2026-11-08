@@ -406,3 +406,8 @@
 @media(prefers-reduced-motion:reduce) {
   .mc-discover *, .mc-discover *::before, .mc-discover *::after {transition:none!important}
 }
+
+.mc-queue-entries{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.mc-queue-entry{display:inline-flex;gap:8px;align-items:center;background:#fff;border:1px solid #d4eadf;border-radius:10px;padding:7px 10px;color:#29725a;font-size:11px}
+.mc-queue-entry button{border:0;border-radius:5px;background:#eef7f1;color:#42705c;cursor:pointer;font-size:16px;line-height:1;padding:1px 5px}
+.mc-queue-entry button:hover{background:#f9e8e3;color:#a44833}
