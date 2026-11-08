@@ -180,3 +180,14 @@ test("Automatic NetBird discovery verifies the control API rather than trusting 
   assert.match(rust,/response\.status\(\)\.is_success\(\)/);
   assert.match(rust,/cache\.lock\(\)\.await=Some/);
 });
+
+test("desktop interface uses consistent administrative labels without promotional slogans",()=>{
+  assert.doesNotMatch(html,/Thoughtfully built for your world|class="spark"|class="profile"/i);
+  assert.doesNotMatch(ui,/beautifully managed|WELCOME BACK|YOUR MINECRAFT WORLD|in one calm place/i);
+  assert.doesNotMatch(market,/Discover server content|Browse, explore and install|Powered by Modrinth/i);
+  assert.match(ui,/header\("SERVER","Overview"/);
+  assert.match(market,/Plugins & Datapacks/);
+  assert.match(marketStyle,/--market-surface:#fff/);
+  assert.match(marketStyle,/\.mc-discover-card/);
+  assert.match(html,/marketplace\.css/);
+});
