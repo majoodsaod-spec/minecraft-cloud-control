@@ -27,59 +27,80 @@ function dialog(title,text,actions){
     $("#dialogCancel").onclick=()=>done(false);$("#dialogConfirm").onclick=()=>done(true);
   });
 }
+function updateMessage(message,kind="info"){
+  state.updateMessage=message;
+  state.updateMessageKind=kind;
+  syncUpdateButton();
+  const label=$("#updateStatus");
+  if(label)label.textContent=message;
+}
 function syncUpdateButton(){
   const button=$("#quickUpdate");
   if(!button)return;
-  button.disabled=state.updateChecking||!state.github.connected;
   const available=Boolean(state.update?.available);
+  button.disabled=false;
   $("#updateIndicator").hidden=!available;
-  $("#quickUpdateLabel").textContent=state.updateChecking?"Checking…":available?"Update available":"Quick Update";
-  button.title=!state.github.connected?"Connect GitHub to check for updates":
-    available?"Install new build #"+state.update.runNumber+" over this app":
-    "Check GitHub for a newer Windows desktop build";
+  $("#quickUpdateLabel").textContent=state.updateChecking?"Updating…":available?"Install update":"Quick Update";
+  button.title=state.updateMessage||"Check for the latest Windows build and install it";
+  button.setAttribute("aria-busy",state.updateChecking?"true":"false");
+  const label=$("#updateStatus");
+  if(label)label.textContent=state.updateMessage||"";
 }
 async function checkDesktopUpdate(silent=false){
   if(!state.github.connected){
-    if(!silent)flash("Connect GitHub before checking for updates.");
-    return;
+    if(!silent)updateMessage("Connect GitHub under Connections to enable updates.","error");
+    return null;
   }
-  if(state.updateChecking)return;
+  if(state.updateChecking){
+    if(!silent)updateMessage("An update check is already running.","info");
+    return null;
+  }
   state.updateChecking=true;
-  syncUpdateButton();
+  if(!silent)updateMessage("Checking GitHub for the newest Windows installer…");
+  else syncUpdateButton();
   try{
-    const update=await run("desktop_check_update",{}, {quiet:silent});
+    const update=await run("desktop_check_update",{}, {quiet:true});
     state.update=update;
-    if(!silent&&!update.available){
-      flash("Minecraft Cloud is up to date · installer build #"+update.runNumber);
-    }
-    if(update.available&&!silent){
-      flash("Update available! Build #"+update.runNumber+" · click Quick Update again to install.");
+    if(!silent){
+      updateMessage(update.available?"Build #"+update.runNumber+" is ready to install.":"Already up to date · build #"+update.runNumber,update.available?"success":"info");
     }
     return update;
   }catch(e){
-    if(!silent)flash(errorText(e));
+    if(!silent)updateMessage("Update check failed: "+errorText(e),"error");
+    return null;
   }finally{
     state.updateChecking=false;
     syncUpdateButton();
-    if(state.page==="connections")render();
+    if(state.page==="connections"&&!editing())render();
   }
 }
 async function quickUpdate(){
-  if(!state.github.connected)return flash("Connect GitHub first to enable Quick Update.");
-  const update=state.update?.available?state.update:await checkDesktopUpdate(false);
-  if(!update?.available)return;
+  if(state.updateChecking){
+    updateMessage("An update operation is already running.");
+    return;
+  }
+  if(!state.github.connected){
+    updateMessage("Connect GitHub under Connections before updating.","error");
+    state.page="connections";render();
+    return;
+  }
+  const update=await checkDesktopUpdate(false);
+  if(!update||!update.available)return;
   if(!await dialog("Install Minecraft Cloud update?",
-    "Build #"+update.runNumber+" ("+update.commit+"). The app will download the latest successful Windows installer directly from GitHub, close, and install it over your existing app. Your Windows credentials and Minecraft world remain untouched. This downloads the full installer, not a delta patch."))return;
-  state.updateChecking=true;syncUpdateButton();
-  flash("Downloading and preparing update from GitHub…");
+    "Build #"+update.runNumber+" ("+update.commit+"). Download the latest successful installer from GitHub and upgrade the app? Your saved connections and Minecraft world will not be changed.")){
+    updateMessage("Installation cancelled.");
+    return;
+  }
+  state.updateChecking=true;
+  updateMessage("Preparing the Windows installer…");
   try{
-    await run("desktop_install_update",{expectedBuild:update.latestBuild});
-    // Usually the app exits after launching NSIS.
-    flash("Windows installer launched. Follow any Windows prompts.");
+    await run("desktop_install_update",{expectedBuild:update.latestBuild},{quiet:true});
+    updateMessage("Installer launched. Follow the Windows prompts.","success");
   }catch(e){
-    flash("Update failed: "+errorText(e));
+    updateMessage("Update failed: "+errorText(e),"error");
   }finally{
-    state.updateChecking=false;syncUpdateButton();
+    state.updateChecking=false;
+    syncUpdateButton();
   }
 }
 function directOnline(){
@@ -261,7 +282,7 @@ function drawConnections(){
      ${state.cloudError?`<p class="field-tip" style="color:#c46b53">Last error: ${esc(state.cloudError)}</p>`:""}
    `)}</div>`+
    `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Direct Paper · NetBird</h2>${directOnline()?pill("● Private connection online",""):pill("○ Not connected","warn")}</div><p class="field-tip">Connect directly to your temporary GitHub Actions Paper runner. NetBird must be connected on your Windows PC. The app automatically discovers connected minecraft-paper-* peers after each restart. Live console and server metrics work without Cloudflare.</p><div class="notice good" style="margin-top:17px"><label for="netbirdAuto" style="display:flex;align-items:center;gap:12px;cursor:pointer"><input id="netbirdAuto" type="checkbox" ${state.netbirdAuto?.enabled?"checked":""} style="width:17px;height:17px;accent-color:#158b69"><span><strong>Automatically connect NetBird</strong><span style="display:block;font-size:11px;margin-top:5px">Connect on app launch and disconnect when it closes, only if Minecraft Cloud started the VPN itself.</span></span></label><div style="margin-top:9px;font-size:11px">NetBird: ${state.netbirdAuto?.connected?"Connected":"Not connected"} ${state.netbirdAuto?.ownedByApp?"· Managed by Minecraft Cloud":""}</div></div><div class="field" style="margin-top:16px"><label for="directToken">Direct-control secret</label><input id="directToken" type="password" autocomplete="off" placeholder="Value saved as MINECRAFT_DIRECT_TOKEN in GitHub Secrets"></div><div class="field"><label for="directPeer">Manual NetBird peer IP (optional)</label><input id="directPeer" placeholder="Leave blank for automatic discovery"></div><div class="header-actions" style="justify-content:flex-start"><button class="btn primary" data-action="connect-direct">Connect Direct Paper</button><button class="btn flat" data-action="test-direct">Test connection</button></div>${state.directError?`<p class="field-tip" style="color:#b96154;margin-top:12px">${esc(state.directError)}</p>`:""}</section>`+
-   `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Windows app updates</h2>${state.update?.available?pill("● New build available",""):pill("Installed app","muted")}</div><p class="field-tip">Check GitHub for the latest successful Windows installer. Quick Update upgrades your existing installation without manually downloading or extracting ZIP files. Your login remains saved on this PC.</p><div class="header-actions" style="justify-content:flex-start;margin-top:16px"><button class="btn primary" data-action="check-update" ${gh?"":"disabled"}>${state.update?.available?"Install update #"+state.update.runNumber:"↻ Quick Update"}</button><span class="field-tip">${state.update?"Installed build "+(state.update.currentBuild||"legacy")+" · Latest build "+state.update.runNumber:"No update check performed yet"}</span></div></section>`;
+   `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Windows app updates</h2>${state.update?.available?pill("● New build available",""):pill("Installed app","muted")}</div><p class="field-tip">Check GitHub for the latest successful Windows installer. Quick Update upgrades your existing installation without manually downloading or extracting ZIP files. Your login remains saved on this PC.</p><div class="header-actions" style="justify-content:flex-start;margin-top:16px"><button class="btn primary" data-action="check-update">${state.update?.available?"Install update #"+state.update.runNumber:"↻ Quick Update"}</button><span class="field-tip" id="updateStatus">${esc(state.updateMessage|| (state.update?"Installed build "+(state.update.currentBuild||"legacy")+" · Latest build "+state.update.runNumber:"No update check performed yet"))}</span></div></section>`;
 }
 // Edits survive background telemetry updates, navigation, and incidental
 // rerenders. Never store typed secrets outside this running app process.
@@ -386,7 +407,7 @@ async function startApp(){
 async function action(type,id){
   switch(type){
   case "refresh":return refresh();
-  case "check-update":return state.update?.available?quickUpdate():checkDesktopUpdate(false);
+  case "check-update":return quickUpdate();
   case "server-logs":{
     if(!state.github.connected)return flash("Connect GitHub first.");
     state.page="console";state.githubLog=null;state.githubLogError=null;
@@ -491,6 +512,18 @@ async function action(type,id){
   default:flash("Action unavailable.");
   }
 }
+// Native updater sends download progress over the Tauri event bus.
+window.__TAURI__.event.listen("desktop-update-progress",ev=>{
+  const progress=ev.payload||{};
+  if(progress.stage==="downloading"){
+    const percent=Number.isFinite(progress.percent)?progress.percent:null;
+    updateMessage(percent===null?"Downloading Windows installer…":"Downloading Windows installer… "+percent+"%");
+  }else if(progress.stage==="extracting"){
+    updateMessage("Download complete · extracting Windows installer…");
+  }else if(progress.stage==="launching"){
+    updateMessage("Launching Windows installer…");
+  }
+}).catch(()=>{});
 document.addEventListener("click",ev=>{
   const nav=ev.target.closest("[data-page]");
   if(nav){state.page=nav.dataset.page;render();if(state.page==="workflows"&&!state.workflows&&state.github.connected)refresh(true);if(state.page==="console"&&!connectedLive()&&state.github.connected)loadGithubServerLog(true).then(render);return;}
