@@ -346,6 +346,35 @@ async function refresh(quiet=false){
 }
 async function startApp(){
   try{state.github=await invoke("github_status")}catch{state.github={connected:false}}
+  // Register before starting Rust's SSE listener so the first event is kept.
+  try{
+    const listen=window.__TAURI__.event.listen;
+    await listen("paper-live-status",event=>{
+      const next=event.payload;
+      if(!next||typeof next!=="object"||!next.session)return;
+      const previous=state.direct;
+      state.direct=next;
+      state.directFetchedAt=Date.now();
+      state.directError=null;
+      const changes=JSON.stringify({
+        ready:previous?.ready,session:previous?.session,players:previous?.players,
+        phase:previous?.phase,memoryMiB:previous?.memoryMiB
+      })!==JSON.stringify({
+        ready:next.ready,session:next.session,players:next.players,
+        phase:next.phase,memoryMiB:next.memoryMiB
+      });
+      if(state.page==="console")updateConsoleOutput();
+      if(changes&&["overview","connections"].includes(state.page)&&!editing())render();
+      tickLiveUI();
+    });
+    await listen("paper-live-disconnected",()=>{
+      state.direct=null;
+      state.directFetchedAt=0;
+      if(state.page==="console")updateConsoleOutput();
+      if(["overview","connections"].includes(state.page)&&!editing())render();
+    });
+    await invoke("direct_start_stream");
+  }catch(error){state.directError=errorText(error);}
   await loadNetbirdAuto();
   render();await refresh(true);
   if(state.github.connected)checkDesktopUpdate(true);
@@ -489,7 +518,7 @@ async function pollLiveTelemetry(){
   if(document.visibilityState!=="visible"||livePollPending||state.busy)return;
   livePollPending=true;
   try{
-    await loadCloud(true);
+    if(!directOnline())await loadCloud(true);
     if(state.page==="console")updateConsoleOutput();
     if(["overview","connections"].includes(state.page)&&!editing())render();
     tickLiveUI();
@@ -500,6 +529,9 @@ setInterval(pollLiveTelemetry,2000);
 // Cloudflare polling. The single-flight guard in loadDirect prevents overlap.
 setInterval(async()=>{
   if(document.visibilityState!=="visible")return;
+  // Periodic direct probes are a compatibility fallback for older runner
+  // versions that have not yet received /api/events.
+  if(directOnline())return;
   await loadDirect(true);
   if(state.page==="console")updateConsoleOutput();
   if(["overview","connections"].includes(state.page)&&!editing())render();
