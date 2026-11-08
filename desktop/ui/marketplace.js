@@ -31,6 +31,7 @@
     kind: "plugin", query: "", category: "", version: "26.3", loader: "",
     sort: "downloads", page: 0, total: 0, hits: [], loading: false,
     loaded: false, installing: "", notice: "", error: false, installed: [],
+    queued: {}, queueLoaded: false, queueBusy: false,
     sortTouched: false,
     online: false, epoch: 0, searchTimer: null
   };
@@ -63,8 +64,9 @@
     const loaderTags = other.map(cat => '<span class="mc-discover-loader">' + escape(pretty(cat)) + '</span>').join("");
     const installing = state.installing === item.project_id;
     const installed = state.installed.some(x => x.projectId === item.project_id);
-    const disabled = !state.online || Boolean(state.installing) || state.version !== "26.3";
-    const buttonLabel = installing ? "Installing…" : installed ? "Reinstall" : "Install";
+    const disabled = Boolean(state.installing) || state.version !== "26.3";
+    const queued = Boolean(state.queued[item.project_id]);
+    const buttonLabel = installing ? "Processing…" : !state.online ? (queued ? "Update queue" : "Queue install") : (installed ? "Reinstall" : "Install");
     return '<article class="mc-discover-card">' +
       '<div class="mc-discover-art">' + icon + '</div>' +
       '<div class="mc-discover-card-main"><div class="mc-discover-title">' +
@@ -147,7 +149,7 @@
       '<div class="mc-discover-head"><div><div class="mc-discover-eyebrow"><span>◉</span> CONTENT LIBRARY</div>' +
       '<h1>Plugins & Datapacks</h1><p>Browse Modrinth and install compatible content directly to Paper.</p></div>' +
       '<div class="mc-discover-server">' + (state.online ? '<span class="online">● Server connected</span>' :
-        '<span class="offline">○ NetBird disconnected</span>') + '<small>Paper 26.3</small></div></div>' +
+        '<span class="offline">○ Offline installs will be queued</span>') + '<small>Paper 26.3</small></div></div>' +
       '<div class="mc-discover-kind-bar">' +
       '<button type="button" class="' + (state.kind === "plugin" ? "active" : "") +
       '" data-market-action="kind" data-value="plugin">⬡ Plugins</button>' +
@@ -177,19 +179,43 @@
     if (slot) slot.classList.toggle("is-error", state.error);
     renderInstalled();
     renderResults();
+    ensureQueueLoaded();
   }
 
   function renderInstalled() {
     const area = document.getElementById("mc-market-installed");
     if (!area) return;
     const pending = state.installed.some(x => x.restartRequired);
-    area.innerHTML = !state.installed.length ? '' :
+    const queued = Object.entries(state.queued);
+    const pendingBox = queued.length ? '<div class="mc-discover-installed"><div><strong>Pending next server start · ' + queued.length + '</strong><span>These downloads will be installed automatically after the latest verified backup is restored.</span></div><div class="mc-queue-entries">' + queued.map(([id,item])=>
+      '<span class="mc-queue-entry">' + escape(item.title||id) + ' <button type="button" data-market-action="unqueue" data-id="' + escape(id) + '" title="Remove queued install">×</button></span>').join("") + '</div></div>' : "";
+    area.innerHTML = pendingBox + (!state.installed.length ? '' :
       '<div class="mc-discover-installed"><div><strong>✓ Installed on your server</strong>' +
       '<span>' + state.installed.map(x => escape(x.name)).join(", ") +
       (pending ? " · Restart needed for plugins" : " · Reload requested for datapacks") +
-      '</span></div>' + (pending ? '<button type="button" data-action="market-restart">Safely restart</button>' : '') + '</div>';
+      '</span></div>' + (pending ? '<button type="button" data-action="market-restart">Safely restart</button>' : '') + '</div>');
   }
 
+  async function ensureQueueLoaded(){
+    if(state.queueLoaded||state.queueBusy)return;
+    state.queueBusy=true;
+    try{
+      const queued=await invoke("modrinth_queue_list");
+      state.queued=queued&&typeof queued==="object"?queued:{};
+      state.queueLoaded=true;
+      if(active()){renderInstalled();renderResults();}
+    }catch(e){status("Could not load pending installs: "+String(e).slice(0,150),true)}
+    finally{state.queueBusy=false;}
+  }
+  async function unqueue(projectId){
+    if(!state.queued[projectId])return;
+    try{
+      await invoke("modrinth_queue_remove",{projectId});
+      delete state.queued[projectId];
+      renderInstalled();renderResults();
+      status("Queued install removed.",false);
+    }catch(e){status("Could not remove queued install: "+String(e).slice(0,150),true)}
+  }
   async function search() {
     const epoch = ++state.epoch;
     state.loading = true;
@@ -234,18 +260,25 @@
   }
   async function install(projectId) {
     if (state.installing) return;
-    if (!state.online) return status("Connect to the live Paper server through NetBird to install.", true);
+
     if (state.version !== "26.3") return status("Select version 26.3 to install onto this server.", true);
     const candidate = state.hits.find(x => x.project_id === projectId);
     if (!candidate) return;
     state.installing = projectId;
-    status("Checking compatibility and downloading " + candidate.title + " directly to your server…", false);
+    status(state.online ? "Checking and installing " + candidate.title + "…" : "Checking and queuing " + candidate.title + " for next startup…", false);
     renderResults();
     try {
       const versionsFound = await invoke("modrinth_versions", { projectId, kind: state.kind });
       if (!Array.isArray(versionsFound) || !versionsFound.length)
         throw Error("No verified Paper 26.3 release is available.");
       const version = versionsFound.find(v => v.version_type === "release") || versionsFound[0];
+      if (!state.online) {
+        await invoke("modrinth_queue_add",{projectId,versionId:version.id,kind:state.kind,title:candidate.title||projectId});
+        state.queued[projectId]={versionId:version.id,kind:state.kind,title:candidate.title||projectId};
+        status(candidate.title+" queued. It will download directly to Paper after the next verified world restore.", false);
+        renderInstalled();
+        return;
+      }
       const answer = await invoke("direct_command", { kind: "marketplace-install",
         args: { projectId, versionId: version.id, kind: state.kind } });
       if (!answer || !answer.ok || !answer.result || !answer.result.installed)
@@ -279,6 +312,7 @@
       render(state.online); search();
     }
     if (action === "install") install(el.dataset.id);
+    if (action === "unqueue") unqueue(el.dataset.id);
     if (action === "previous" && state.page > 0) {
       state.page--; search();
       root()?.scrollIntoView({ behavior: "smooth", block: "start" });
