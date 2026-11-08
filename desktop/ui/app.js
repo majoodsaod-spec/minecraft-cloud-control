@@ -247,7 +247,7 @@ function drawOverview(){
   const status=online?"Paper online":activeRun(main)?"Runner active · Paper unverified":main?.conclusion==="failure"?"Latest server run failed":main?.conclusion==="success"?"Last session finished":github?"No active Minecraft runner":"GitHub not connected";
   const statePill=online?pill("● LIVE SERVER",""):activeRun(main)?pill("◉ GITHUB RUN ACTIVE","warn"):main?.conclusion==="failure"?pill("● WORKFLOW FAILED","warn"):pill("○ NO LIVE PAPER DATA");
   const desc=online?(directOnline()?"Paper connected directly over NetBird, independently of Cloudflare.":"Paper is responding through Cloudflare."):activeRun(main)?"GitHub confirms a workflow is active, but it does not verify that Paper is ready. Use GitHub logs to check startup.":main?.conclusion==="failure"?"GitHub reports the last Minecraft workflow failed. Open its job logs below to identify the problem.":github?"GitHub is connected; there is no confirmed live Paper heartbeat. Start a new run only if no Minecraft workflow is active.":"Connect GitHub to manage workflows. GitHub access does not provide a live Paper connection.";
-  const hero=`<div class="hero"><div class="hero-top"><div><div class="hero-label">YOUR MINECRAFT WORLD</div><div class="hero-title">${esc(status)}</div></div>${statePill}</div><div class="hero-desc">${desc}</div><div class="hero-actions">${btn("▶ Start server","start-server","primary")} ${btn("↻ Safe restart","restart-server")} ${btn("■ Save & stop","stop-server","danger")} ${main?btn("◷ View Minecraft logs","server-logs","flat"):""}</div></div>`;
+  const hero=`<div class="hero"><div class="hero-top"><div><div class="hero-label">SERVER STATUS</div><div class="hero-title">${esc(status)}</div></div>${statePill}</div><div class="hero-desc">${desc}</div><div class="hero-actions">${btn("▶ Start server","start-server","primary")} ${btn("↻ Safe restart","restart-server")} ${btn("■ Save & stop","stop-server","danger")} ${main?btn("◷ View Minecraft logs","server-logs","flat"):""}</div></div>`;
   const stats=`<div class="stats">
    ${stat("Online players",online?(live.players||[]).length:"—",online?"Connected to Paper":"Live connection required","♙")}
    ${stat("Server uptime",liveClock.session?duration(interpolatedPaperSeconds("uptime")):"—","Current runner session","◷","uptime")}
@@ -261,7 +261,7 @@ function drawOverview(){
    ${panel("Recent activity",recent.length?`<div class="run-list">${recent.map(r=>runRow(r)).join("")}</div>`:boxEmpty("No runs loaded","Connect your GitHub account to see recent activity.","⎇"),`<button class="btn small flat" data-page="workflows">View all →</button>`)}
    ${panel("Connection health",`<div class="list-stat"><span>GitHub</span><strong>${github?"● Connected":"○ Not connected"}</strong></div><div class="list-stat"><span>Direct Paper · NetBird</span><strong>${directOnline()?"● Connected":"○ Not connected"}</strong></div>${!directOnline()&&state.directError?`<p class="field-tip" style="margin:10px 0 12px;color:#ae624f">Direct connection: ${esc(state.directError)}</p>`:""}<div class="list-stat"><span>Cloudflare bridge</span><strong>${state.cloud?.bridge?.status?.ready?"● Connected":"○ Offline / unavailable"}</strong></div><div class="list-stat"><span>Minecraft workflow</span><strong>${main?esc(main.conclusion||main.status||"unknown"):"—"}</strong></div><div class="list-stat"><span>Latest run</span><strong>${main?esc("#"+main.run_number):"—"}</strong></div><div class="list-stat"><span>World backups</span><strong>${(state.overview?.artifacts||[]).filter(a=>!a.expired).length}</strong></div><p class="field-tip" style="margin-top:18px">GitHub workflow management works without Cloudflare. Safe live commands need a working server bridge.</p>`)}
    </div>`;
-  $("#content").innerHTML=header("WELCOME BACK","Your server, beautifully managed.","Everything important about your Minecraft world, in one calm place.",btn("↻ Refresh","refresh","flat"))+hero+stats+runnerCard+actions;
+  $("#content").innerHTML=header("SERVER","Overview","Manage your server, plugins, files and backups.",btn("↻ Refresh","refresh","flat"))+hero+stats+runnerCard+actions;
 }
 function drawWorkflows(){
   const workflows=(state.workflows||[]).filter(w=>w.state!=="deleted"),runs=state.overview?.runs||[];
@@ -270,7 +270,7 @@ function drawWorkflows(){
     const permitted=["paper-state-test.yml","dashboard-checks.yml","maintenance-log.yml"].includes(file);
     return `<div class="workflow-item"><div><div class="workflow-name">${esc(w.name)}</div><div class="workflow-meta">${esc(file)} · ${esc(w.state||"active")}</div></div><div class="row-buttons">${permitted?`<button class="btn small flat" data-action="dispatch" data-id="${esc(file)}">Run workflow</button>`:""}<button class="btn small" data-action="filter-runs" data-id="${esc(file)}">Runs</button></div></div>`;
   }).join(""):boxEmpty("Workflows unavailable","Connect GitHub and refresh to load workflows.","⎇");
-  $("#content").innerHTML=header("AUTOMATION","GitHub Actions","Run workflows, inspect jobs, and manage activity directly through GitHub.",btn("↻ Refresh","refresh","flat"))
+  $("#content").innerHTML=header("WORKFLOWS","GitHub Actions","Start workflows and inspect recent runs.",btn("↻ Refresh","refresh","flat"))
   +notice("<strong>World protection:</strong> Running Minecraft sessions can't be force-cancelled here. Use Safe Save & Stop in Overview to preserve your world.")
   +panel("Available workflows",items)
   +panel("Recent runs",runs.length?`<div class="run-list">${runs.slice(0,20).map(r=>runRow(r,true)).join("")}</div>`:boxEmpty("No workflow runs","Workflow activity will appear here once connected.","◷"),pill(runs.length+" loaded runs"));
@@ -289,7 +289,7 @@ function drawConsole(){
     const cls=/\b(ERROR|Exception|failed)\b/i.test(line)?"error":/\b(INFO|Done|joined)\b/i.test(line)?"info":"";
     return `<div class="${cls}">${esc(line)}</div>`;
   }).join(""):githubFallback&&githubLogs?`<span class="dim">GitHub Actions logs (may be delayed; read-only)</span>\n${esc(githubLogs)}`:`<span class="dim">${esc(state.githubLogError||"No Paper live console. GitHub job logs are available below when GitHub publishes them.")}</span>`;
-  $("#content").innerHTML=header("LIVE MANAGEMENT","Console","Your Paper server's latest output, securely relayed when the live bridge is available.",btn("↻ Refresh","refresh","flat"))
+  $("#content").innerHTML=header("SERVER","Live Console","Paper output and server commands.",btn("↻ Refresh","refresh","flat"))
    +(online?notice(directOnline()?"● Direct NetBird connection online. Console works without Cloudflare.":"● Cloudflare bridge online — console commands are sent to Paper.",true):notice(githubFallback?"GitHub read-only log fallback is active. These logs may be delayed or unavailable during an active job. GitHub does not support sending Paper console commands.":"The live bridge is offline. Connect GitHub to inspect workflow logs. Do not force-cancel a running Minecraft job."))
    +panel(online?"Paper live console":"GitHub Actions · read-only job logs",`<p class="field-tip" id="consoleTransport" role="status" style="margin:0 0 12px">${esc(consoleTransport())}</p><div class="header-actions" style="justify-content:flex-start;margin-bottom:12px"><button class="btn small flat" data-action="server-logs" ${githubFallback?"":"disabled"}>↻ Load GitHub logs</button><span class="field-tip">${esc(state.githubLogInfo||"GitHub job output is not a direct Paper connection")}</span></div><div class="console" id="terminal">${lines}</div><form id="consoleForm" class="console-form"><input id="commandText" placeholder="Enter a Paper console command…" autocomplete="off" aria-label="Paper console command" ${online?"":"disabled"}><button class="btn primary" ${online?"":"disabled"}>Send ↗</button></form>`);
   const term=$("#terminal");term.scrollTop=term.scrollHeight;
@@ -306,7 +306,7 @@ function drawFiles(){
       try{text=atob(f.content.replace(/\s/g,""))}catch{text=""}
     }
   }
-  $("#content").innerHTML=header("SOURCE CONTROL","Repository Files","Make persistent edits directly to GitHub. Changes apply to Minecraft at the next server session.",btn("↻ Reload file","load-file","flat"))
+  $("#content").innerHTML=header("FILES","Repository Files","View and edit server configuration in GitHub.",btn("↻ Reload file","load-file","flat"))
    +notice("Repository edits are committed to GitHub and don't immediately alter the running Paper process. For world data or live configuration, use the server's safe controls.")
    +panel("File editor",`<div class="field"><label for="filepath">Repository path</label><div class="form-row"><div class="field"><input id="filepath" value="${esc(state.filePath)}" spellcheck="false" placeholder="server/server.properties"></div><button class="btn primary" data-action="load-file">Open file</button></div><div class="field-tip">Examples: server/server.properties, server/java.json, server/bedrock.json, README.md</div></div>
     <div class="field"><label for="filecontent">File contents ${isLoaded?"· "+esc(f.sha?.slice(0,8)):""}</label><textarea id="filecontent" spellcheck="false" placeholder="Select a repository file above…" ${isLoaded&&editable?"":"disabled"}>${esc(text)}</textarea></div>
@@ -314,13 +314,13 @@ function drawFiles(){
 }
 function drawBackups(){
   const artifacts=(state.overview?.artifacts||[]).filter(a=>!a.expired&&a.name==="minecraft-world").sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
-  $("#content").innerHTML=header("WORLD SAFETY","World Backups","Your verified world snapshots, downloaded directly from GitHub.",btn("↻ Refresh","refresh","flat"))
+  $("#content").innerHTML=header("BACKUPS","World Backups","Download saved world snapshots.",btn("↻ Refresh","refresh","flat"))
    +notice("<strong>Important:</strong> Always wait for the server to finish saving and uploading a verified backup before shutting it down. Download critical backups to your own PC.")
    +panel("Available snapshots",artifacts.length?`<div class="run-list">${artifacts.map(a=>`<div class="run"><div class="run-icon">▤</div><div class="run-content"><strong>${esc(when(a.created_at))}</strong><span>Run #${esc(a.workflow_run?.id||"—")} · ${esc(bytes(a.size_in_bytes))}</span></div><div class="row-buttons"><button class="btn small flat" data-action="download" data-id="${Number(a.id)}">↓ Download ZIP</button></div></div>`).join("")}</div>`:boxEmpty("No snapshots found","Snapshots appear after a successful safe save and backup.","◷"));
 }
 function drawConnections(){
   const gh=state.github.connected;
-  $("#content").innerHTML=header("PREFERENCES","Connections","Your accounts stay on this computer. The Windows app never sends your GitHub token through Cloudflare.")
+  $("#content").innerHTML=header("SETTINGS","Connections","Manage GitHub, Cloudflare and NetBird connections.")
    +`<div class="columns">${panel("GitHub · Primary connection",`
      ${pill(gh?"● Connected":"○ Not connected",gh?"":"muted")}
      <p class="field-tip" style="margin:15px 0 20px">Direct GitHub access for workflows, repository files, job history and world backup downloads. Token is held in Windows Credential Manager.</p>
@@ -366,7 +366,7 @@ function render(){
   restoreDrafts();
   syncUpdateButton();
   const pageNode=$("#content");
-  // Animate navigation, never periodic status refreshes: telemetry stays calm.
+  // Animate navigation only; keep telemetry updates unobtrusive.
   if(state._lastAnimatedPage!==state.page){
     pageNode.classList.remove("mc-page-enter");
     void pageNode.offsetWidth;
