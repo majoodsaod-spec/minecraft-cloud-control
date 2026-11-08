@@ -193,6 +193,8 @@ struct UpdateCheck {
     run_number: u64,
     commit: String,
     artifact_id: u64,
+    latest_attempt_number: u64,
+    latest_attempt_status: String,
 }
 
 async fn current_update() -> Result<UpdateCheck, String> {
@@ -200,6 +202,19 @@ async fn current_update() -> Result<UpdateCheck, String> {
     // arbitrary-branch artifacts as application updates.
     let path=format!("/actions/workflows/{INSTALLER_WORKFLOW}/runs?branch=main&status=success&per_page=12");
     let runs=github(&path, reqwest::Method::GET, None).await?;
+    // Keep failed, cancelled and in-progress attempts visible to users:
+    // otherwise the updater misleadingly claims there is nothing new.
+    let latest_attempt=github(&format!("/actions/workflows/{INSTALLER_WORKFLOW}/runs?branch=main&per_page=1"),
+        reqwest::Method::GET,None).await.unwrap_or(json!({}));
+    let attempt=latest_attempt["workflow_runs"].as_array().and_then(|list|list.first());
+    let latest_attempt_number=attempt.and_then(|run|run["run_number"].as_u64()).unwrap_or(0);
+    let latest_attempt_status=attempt.map(|run| {
+        if run["status"].as_str()==Some("completed") {
+            run["conclusion"].as_str().unwrap_or("unknown")
+        } else {
+            run["status"].as_str().unwrap_or("unknown")
+        }
+    }).unwrap_or("unknown").to_owned();
     let candidates=runs["workflow_runs"].as_array()
         .ok_or("GitHub did not return a list of installer builds")?;
     for run in candidates {
@@ -225,7 +240,7 @@ async fn current_update() -> Result<UpdateCheck, String> {
                 current_build:installed_build(),latest_build:run_id,
                 run_number:run["run_number"].as_u64().unwrap_or(0),
                 commit:run["head_sha"].as_str().unwrap_or("").chars().take(12).collect(),
-                artifact_id,
+                artifact_id,latest_attempt_number,latest_attempt_status,
             });
         }
     }
