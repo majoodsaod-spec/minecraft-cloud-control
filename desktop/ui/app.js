@@ -36,6 +36,14 @@ function updateMessage(message,kind="info"){
   const details=$("#updateStatusConnections");
   if(details)details.textContent=message;
 }
+function updateBuildMessage(update){
+  if(update.available)return "Build #"+update.runNumber+" is ready to install.";
+  if(Number(update.latestAttemptNumber||0)>Number(update.runNumber||0)){
+    const status=String(update.latestAttemptStatus||"unknown").replaceAll("_"," ");
+    return "Newest build #"+update.latestAttemptNumber+" "+status+" · latest installable build #"+update.runNumber;
+  }
+  return "Already up to date · build #"+update.runNumber;
+}
 function syncUpdateButton(){
   const button=$("#quickUpdate");
   if(!button)return;
@@ -65,8 +73,8 @@ async function checkDesktopUpdate(silent=false){
   try{
     const update=await run("desktop_check_update",{}, {quiet:true});
     state.update=update;
-    if(!silent){
-      updateMessage(update.available?"Build #"+update.runNumber+" is ready to install.":"Already up to date · build #"+update.runNumber,update.available?"success":"info");
+    if(!silent || !update.available && Number(update.latestAttemptNumber||0)>Number(update.runNumber||0)){
+      updateMessage(updateBuildMessage(update),update.available?"success":"info");
     }
     return update;
   }catch(e){
