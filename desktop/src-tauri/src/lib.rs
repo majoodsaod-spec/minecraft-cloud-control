@@ -828,20 +828,53 @@ async fn direct_start_stream(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 #[tauri::command]
-async fn modrinth_search(query: String, kind: String) -> Result<Value, String> {
-    if !["plugin","datapack"].contains(&kind.as_str()) || query.len()>100 {
-        return Err("Invalid Modrinth search".into());
+async fn modrinth_search(
+    query: String, kind: String, category: String, sort: String,
+    version: String, loader: String, offset: u32,
+) -> Result<Value, String> {
+    // Only allow known facets. Facet expressions must never be built from
+    // arbitrary input accepted from the WebView.
+    const CATEGORIES: &[&str] = &[
+        "adventure","cursed","decoration","economy","equipment","food",
+        "game-mechanics","library","magic","management","minigame","mobs",
+        "optimization","social","storage","technology","transportation",
+        "utility","worldgen"
+    ];
+    const VERSIONS: &[&str] = &[
+        "26.3","26.2","26.1.2","26.1.1","26.1","1.21.11","1.21.10"
+    ];
+    const SORTS: &[&str] = &["relevance","downloads","follows","updated","newest"];
+    const LOADERS: &[&str] = &["paper","purpur","spigot","bukkit"];
+    if !["plugin","datapack"].contains(&kind.as_str())
+        || query.len()>100
+        || !CATEGORIES.contains(&category.as_str()) && !category.is_empty()
+        || !VERSIONS.contains(&version.as_str()) && !version.is_empty()
+        || !SORTS.contains(&sort.as_str())
+        || !LOADERS.contains(&loader.as_str()) && !loader.is_empty()
+        || (kind=="datapack" && !loader.is_empty())
+        || offset>5000 {
+        return Err("Invalid Modrinth marketplace filters".into());
     }
-    let facets = if kind=="plugin" {
-        r#"[["all_project_types:plugin"],["versions:26.3"]]"#
-    } else {
-        r#"[["all_project_types:datapack"],["versions:26.3"]]"#
-    };
+    let mut facets=vec![vec![format!("all_project_types:{kind}")]];
+    if !version.is_empty() { facets.push(vec![format!("versions:{version}")]); }
+    if !category.is_empty() { facets.push(vec![format!("categories:{category}")]); }
+    if !loader.is_empty() { facets.push(vec![format!("categories:{loader}")]); }
+    let facets=serde_json::to_string(&facets).map_err(|_|"Invalid Modrinth facets".to_owned())?;
+    let query_params=[
+        ("query",query.as_str()),("facets",facets.as_str()),
+        ("index",sort.as_str()),("limit","20"),("offset","")
+    ];
+    // Provide pagination as a validated decimal field, not an unchecked URL.
+    let offset_str=offset.to_string();
+    let query_params=[
+        query_params[0],query_params[1],query_params[2],query_params[3],
+        ("offset",offset_str.as_str())
+    ];
     let response=http().get("https://api.modrinth.com/v2/search")
-        .query(&[("query",query.as_str()),("facets",facets),("limit","20")])
+        .query(&query_params)
         .send().await.map_err(|_|"Modrinth search is unavailable".to_owned())?;
     if !response.status().is_success() {
-        return Err(format!("Modrinth search HTTP {}", response.status().as_u16()));
+        return Err(format!("Modrinth search HTTP {}",response.status().as_u16()));
     }
     response.json().await.map_err(|_|"Invalid Modrinth search results".into())
 }
