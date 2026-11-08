@@ -767,24 +767,68 @@ fn find_active_netbird_peer(run_id:u64) -> Result<String,String> {
     Err(format!("The active Paper runner #{run_id} is not reachable as a NetBird peer. NetBird lists {stale} older Minecraft runner(s). Check the current GitHub runner's 'Connect private NetBird management network' step and NetBird access policies."))
 }
 
+// An authenticated status probe, not a NetBird "Connected" label, is the
+// source of truth. A connected overlay peer can be an old/reused GitHub runner.
+static VERIFIED_PEER: OnceLock<tokio::sync::Mutex<Option<(std::time::Instant,String)>>> = OnceLock::new();
 async fn selected_direct_peer_ip() -> Result<String,String> {
-    // A manually configured peer is an explicit user override.
     let manual=secret(DIRECT_PEER).unwrap_or_default();
     if !manual.is_empty() {
         if !private_overlay_ip(&manual) {return Err("Configured NetBird IP is invalid".into());}
         return Ok(manual);
     }
-    // A connected GitHub account provides the authoritative active run ID.
-    // On GitHub errors, keep the legacy discovery path as a fallback.
-    if secret(GITHUB_SECRET).is_ok() {
-        if let Some(id)=active_paper_run().await? {
-            return tokio::task::spawn_blocking(move || find_active_netbird_peer(id))
-                .await.map_err(|_|"NetBird discovery failed".to_owned())?;
+    let cache=VERIFIED_PEER.get_or_init(||tokio::sync::Mutex::new(None));
+    {
+        let guard=cache.lock().await;
+        if let Some((when,ip))=&*guard {
+            if when.elapsed()<std::time::Duration::from_secs(15) {return Ok(ip.clone());}
         }
-        return Err("No active Paper GitHub Actions runner. Start the Minecraft server before connecting NetBird.".into());
     }
-    tokio::task::spawn_blocking(direct_peer_ip)
-        .await.map_err(|_|"NetBird peer discovery failed".to_owned())?
+    let token=secret(DIRECT_SECRET).map_err(|_|"Set the direct-control secret in Connections first".to_owned())?;
+    if token.len()<8 {return Err("Direct-control token must be at least 8 characters".into());}
+    let binary=netbird_binary()?;
+    let report=tokio::task::spawn_blocking(move ||
+        netbird_cli_args(&binary,&["status","--json"])
+    ).await.map_err(|_|"Cannot inspect NetBird peers".to_owned())??;
+    let value:Value=serde_json::from_str(&report)
+        .map_err(|_|"NetBird returned invalid peer metadata".to_owned())?;
+    let peers=value.pointer("/peers/details").and_then(Value::as_array)
+        .ok_or("NetBird did not return a peer list")?;
+    let mut candidates=Vec::new();
+    for peer in peers {
+        let Some(id)=peer["fqdn"].as_str().and_then(runner_peer_id) else {continue;};
+        let ip=peer["netbirdIp"].as_str().unwrap_or("");
+        let status=peer["status"].as_str().unwrap_or("").to_ascii_lowercase();
+        if private_overlay_ip(ip)&&["connected","connecting","idle"].contains(&status.as_str()){
+            candidates.push((id,ip.to_owned(),status));
+        }
+    }
+    if candidates.is_empty(){
+        return Err("No reachable Minecraft Paper peers in NetBird. Start the server or check NetBird policies.".into());
+    }
+    // Prefer recently connected peers but test all plausible runners rather
+    // than assuming the largest GitHub run ID is the only live one.
+    let active=if secret(GITHUB_SECRET).is_ok(){active_paper_run().await.ok().flatten()}else{None};
+    candidates.sort_by_key(|(id,_,status)|(
+        active==Some(*id),status=="connected",*id
+    ));
+    let client=reqwest::Client::builder().no_proxy()
+        .timeout(std::time::Duration::from_millis(1300))
+        .build().map_err(|_|"Couldn't initialize NetBird probe".to_owned())?;
+    let count=candidates.len();
+    for (_,ip,_) in candidates.into_iter().rev().take(16) {
+        let url=format!("http://{ip}:8765/api/status");
+        if let Ok(response)=client.get(&url).bearer_auth(&token).send().await {
+            if response.status().is_success() {
+                if let Ok(body)=response.json::<Value>().await {
+                    if body["session"].as_str().is_some_and(|s|!s.is_empty()) {
+                        *cache.lock().await=Some((std::time::Instant::now(),ip.clone()));
+                        return Ok(ip);
+                    }
+                }
+            }
+        }
+    }
+    Err(format!("Found {count} NetBird Minecraft peer(s), but none answered authenticated TCP/8765. Check the running Paper control service and NetBird access policy."))
 }
 
 fn direct_peer_ip() -> Result<String, String> {
