@@ -11,6 +11,9 @@ const workflow=read(".github/workflows/build-windows.yml");
 const config=JSON.parse(read("desktop/src-tauri/tauri.conf.json"));
 const market=read("desktop/ui/marketplace.js");
 const marketStyle=read("desktop/ui/marketplace.css");
+const manager=read("desktop/ui/server_management.js");
+const managerCss=read("desktop/ui/server_management.css");
+const serverRust=read("desktop/src-tauri/src/server_files.rs");
 
 test("Quick Update gives immediate visible feedback and installs in one interaction",()=>{
   assert.match(ui,/case "check-update":return quickUpdate\(\)/);
@@ -190,4 +193,48 @@ test("desktop interface uses consistent administrative labels without promotiona
   assert.match(marketStyle,/--market-surface:#fff/);
   assert.match(marketStyle,/\.mc-discover-card/);
   assert.match(html,/marketplace\.css/);
+});
+
+test("Server Files replaces the repository filename editor and uses verified backup or live filesystem",()=>{
+  assert.doesNotThrow(()=>new Function(manager));
+  assert.match(html,/data-page="files"[^>]*>.*Server Files/);
+  assert.match(html,/data-page="settings"[^>]*>.*Server Settings/);
+  assert.match(html,/server_management\.js/);
+  assert.match(html,/server_management\.css/);
+  assert.match(ui,/window\.ServerManager\.renderFiles\(directOnline\(\),serverRunning\(\)\)/);
+  assert.match(ui,/window\.ServerManager\.renderSettings\(\)/);
+  assert.doesNotMatch(ui,/data-action="load-file"|data-action="save-file"/);
+  assert.match(serverRust,/async fn verified_backup\(/);
+  assert.match(serverRust,/Sha256::digest\(&inner\)/);
+  assert.match(serverRust,/server_files_list\(path:String,live:bool\)/);
+  assert.match(serverRust,/server_files_stage\(path:String,content:String\)/);
+  assert.match(managerCss,/\.server-manager-layout/);
+});
+test("Server Settings supports typed numbers and switches with queued restart semantics",()=>{
+  assert.match(manager,/type="checkbox"/);
+  assert.match(manager,/typeOf\(key\)==="number"/);
+  assert.match(manager,/online-mode/);
+  assert.match(manager,/server_settings_save/);
+  assert.match(serverRust,/async fn server_settings_save\(/);
+  assert.match(serverRust,/Online mode must remain enabled/);
+  assert.match(manager,/next server startup/);
+});
+test("power buttons reflect server state and restore button confirms world backup",()=>{
+  assert.match(ui,/serverRunning\(\)/);
+  assert.match(ui,/case "restore-backup":/);
+  assert.match(ui,/data-action="restore-backup"/);
+  assert.match(ui,/await dialog\("Restore world backup\?"/);
+  assert.match(rust,/async fn server_restore_backup\(/);
+  assert.match(rust,/dashboard_power_action\("stop",None\)/);
+  assert.match(rust,/dashboard_power_action\("restore",Some\(run_id\)\)/);
+});
+test("Modrinth content queues offline and downloads only on the server",()=>{
+  assert.match(market,/modrinth_queue_add/);
+  assert.match(market,/modrinth_queue_remove/);
+  assert.match(market,/Pending next server start/);
+  assert.match(market,/Queue install/);
+  assert.match(serverRust,/async fn modrinth_queue_add\(/);
+  assert.match(serverRust,/async fn modrinth_queue_remove\(/);
+  assert.match(serverRust,/async fn modrinth_queue_list\(/);
+  assert.match(rust,/modrinth_queue_list,modrinth_queue_add,modrinth_queue_remove/);
 });
