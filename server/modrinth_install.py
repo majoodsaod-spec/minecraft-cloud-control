@@ -69,6 +69,18 @@ def install_modrinth(data:Path, project_id:str, version_id:str, kind:str):
     target_dir.mkdir(parents=True,exist_ok=True)
     name="modrinth-"+project["id"]+suffix
     target=target_dir/name
+    # Queued installs remain the desired state across GitHub runner restarts.
+    # If the verified file already exists in the restored snapshot, do not
+    # download it again on every cycle.
+    if target.is_file() and target.stat().st_size==advertised:
+        existing=hashlib.new(algorithm)
+        with target.open("rb") as source:
+            for part in iter(lambda:source.read(1024*128),b""):
+                existing.update(part)
+        if existing.hexdigest()==expected:
+            return {"name":project.get("title",project_id),"file":str(target.relative_to(data)),
+                    "version":version.get("version_number",""),"kind":kind,
+                    "restartRequired":kind=="plugin","installed":True,"alreadyInstalled":True}
     temporary=target_dir/(name+".download")
     digest=hashlib.new(algorithm)
     total=0
