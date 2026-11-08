@@ -46,6 +46,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/test_desktop_updater.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test Modrinth server-side plugin and datapack installer
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p test_modrinth_marketplace.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run native Rust NetBird peer and connection regression tests
         working-directory: desktop/src-tauri
         shell: pwsh
