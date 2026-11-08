@@ -8,7 +8,7 @@ const bytes=n=>!Number.isFinite(+n)?"—":(+n/1048576).toFixed(1)+" MB";
 const duration=s=>{s=Math.max(0,Math.floor(Number(s)||0));return [Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(x=>String(x).padStart(2,"0")).join(":");};
 const activeRun=r=>["in_progress","queued","waiting","requested","pending"].includes(r?.status);
 const isServer=r=>(r?.name||"").includes("Continuous Paper Minecraft Server")||(r?.path||"").includes("paper-state-test.yml");
-const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,netbirdAuto:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null)};
+const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,cloudFetchedAt:0,netbirdAuto:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null)};
 function flash(text){const box=$("#toast");box.textContent=text;box.classList.add("show");clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>box.classList.remove("show"),4300)}
 function btn(label,action="refresh",cls=""){return `<button class="btn ${cls}" data-action="${action}">${label}</button>`}
 function boxEmpty(title,body,icon="◇"){return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${body}</p></div>`}
@@ -16,7 +16,7 @@ function header(kicker,title,desc,actions=""){return `<div class="page-header"><
 function panel(title,body,right=""){return `<section class="panel"><div class="panel-head"><h2 class="panel-title">${title}</h2>${right}</div>${body}</section>`}
 function notice(text,good=false){return `<div class="notice ${good?"good":""}">${text}</div>`}
 function pill(text,kind="muted"){return `<span class="pill ${kind}">${text}</span>`}
-function stat(label,value,detail,icon){return `<div class="card"><div class="stat-mark"><span class="stat-label">${label}</span><em>${icon}</em></div><div class="stat-value">${esc(value)}</div><div class="stat-sub">${detail}</div></div>`}
+function stat(label,value,detail,icon,id=""){return `<div class="card"><div class="stat-mark"><span class="stat-label">${label}</span><em>${icon}</em></div><div class="stat-value" ${id?`data-live="${id}"`:""}>${esc(value)}</div><div class="stat-sub">${detail}</div></div>`}
 function errorText(error){return String(error||"Unknown error").replace(/^Error:\s*/,"").slice(0,280)}
 async function run(command,args,{quiet=false}={}){try{return await invoke(command,args)}catch(e){if(!quiet)flash(errorText(e));throw e}}
 function dialog(title,text,actions){
@@ -89,6 +89,52 @@ function directOnline(){
 function currentPaper(){
   return directOnline()?state.direct:state.cloud?.bridge?.status||{};
 }
+function liveSampleAge(){
+  // Use the local time when telemetry was received: runner and desktop clocks
+  // can differ, so remote timestamps are not safe for elapsed-time interpolation.
+  const received=directOnline()?state.directFetchedAt:state.cloudFetchedAt;
+  return received?Math.max(0,(Date.now()-received)/1000):0;
+}
+function interpolatedPaperSeconds(field){
+  const live=currentPaper();
+  const baseline=Number(live[field]||0);
+  if(!connectedLive())return null;
+  if(field==="emptyFor"&&(live.players||[]).length)return 0;
+  return Math.max(0,baseline+liveSampleAge());
+}
+function tickLiveUI(){
+  if(document.visibilityState!=="visible")return;
+  const uptime=document.querySelector('[data-live="uptime"]');
+  const empty=document.querySelector('[data-live="empty"]');
+  const runner=document.querySelector('[data-live="runner"]');
+  if(uptime)uptime.textContent=connectedLive()?duration(interpolatedPaperSeconds("uptime")):"—";
+  if(empty)empty.textContent=connectedLive()?duration(interpolatedPaperSeconds("emptyFor")):"—";
+  if(runner){
+    const main=latestServerRun();
+    const started=main&&(main.run_started_at||main.created_at);
+    runner.textContent=activeRun(main)&&started?duration((Date.now()-new Date(started).getTime())/1000):"—";
+  }
+}
+function updateConsoleOutput(){
+  if(state.page!=="console")return;
+  const terminal=$("#terminal");
+  if(!terminal)return;
+  const online=connectedLive(),logs=currentPaper().logs||[];
+  const githubFallback=!online&&state.github.connected;
+  const content=online&&logs.length?logs.map(line=>{
+    const cls=/\b(ERROR|Exception|failed)\b/i.test(line)?"error":/\b(INFO|Done|joined)\b/i.test(line)?"info":"";
+    return `<div class="${cls}">${esc(line)}</div>`;
+  }).join(""):githubFallback&&state.githubLog?`<span class="dim">GitHub Actions logs (may be delayed; read-only)</span>\n${esc(state.githubLog)}`:`<span class="dim">${esc(state.githubLogError||"No Paper live console. GitHub job logs are available below when GitHub publishes them.")}</span>`;
+  if(terminal.innerHTML===content)return;
+  const bottom=terminal.scrollHeight-terminal.scrollTop-terminal.clientHeight<70;
+  terminal.innerHTML=content;
+  if(bottom)terminal.scrollTop=terminal.scrollHeight;
+  // Never replace a focused command input or a partially typed command.
+  const input=$("#commandText");
+  if(input)input.disabled=!online;
+  const send=document.querySelector("#consoleForm button");
+  if(send)send.disabled=!online;
+}
 function connectedLive(){
   // Direct HTTP success is authenticated and timed at receipt by this PC;
   // comparing against the Linux runner's wall clock can incorrectly mark a
@@ -139,11 +185,11 @@ function drawOverview(){
   const hero=`<div class="hero"><div class="hero-top"><div><div class="hero-label">YOUR MINECRAFT WORLD</div><div class="hero-title">${esc(status)}</div></div>${statePill}</div><div class="hero-desc">${desc}</div><div class="hero-actions">${btn("▶ Start server","start-server","primary")} ${btn("↻ Safe restart","restart-server")} ${btn("■ Save & stop","stop-server","danger")} ${main?btn("◷ View Minecraft logs","server-logs","flat"):""}</div></div>`;
   const stats=`<div class="stats">
    ${stat("Online players",online?(live.players||[]).length:"—",online?"Connected to Paper":"Live connection required","♙")}
-   ${stat("Server uptime",online?duration(live.uptime||0):"—","Current runner session","◷")}
-   ${stat("Empty time",online?duration(live.emptyFor||0):"—","Restart after 1 hour empty","⌛")}
+   ${stat("Server uptime",online?duration(interpolatedPaperSeconds("uptime")):"—","Current runner session","◷","uptime")}
+   ${stat("Empty time",online?duration(interpolatedPaperSeconds("emptyFor")):"—","Restart after 1 hour empty","⌛","empty")}
    ${stat("Memory used",online&&live.memoryMiB!=null?Number(live.memoryMiB).toFixed(0)+" MB":"—","Paper Java process","▦")}
   </div>`;
-  const runnerCard=main?panel("GitHub runner · independent status",`<div class="list-stat"><span>Latest Minecraft run</span><strong>#${esc(main.run_number)}</strong></div><div class="list-stat"><span>Workflow status</span><strong>${esc(main.conclusion||main.status||"unknown")}</strong></div><div class="list-stat"><span>Workflow elapsed (approx.)</span><strong>${runnerElapsed!==null?duration(runnerElapsed):"—"}</strong></div><p class="field-tip" style="margin-top:14px">Workflow elapsed is estimated from GitHub timestamps and may include queue time; it is not Paper uptime. Minecraft player and memory metrics require a functioning live bridge.</p><button class="btn small flat" data-action="server-logs">View GitHub job logs</button>`):"";
+  const runnerCard=main?panel("GitHub runner · independent status",`<div class="list-stat"><span>Latest Minecraft run</span><strong>#${esc(main.run_number)}</strong></div><div class="list-stat"><span>Workflow status</span><strong>${esc(main.conclusion||main.status||"unknown")}</strong></div><div class="list-stat"><span>Workflow elapsed (approx.)</span><strong data-live="runner">${runnerElapsed!==null?duration(runnerElapsed):"—"}</strong></div><p class="field-tip" style="margin-top:14px">Workflow elapsed is estimated from GitHub timestamps and may include queue time; it is not Paper uptime. Minecraft player and memory metrics require a functioning live bridge.</p><button class="btn small flat" data-action="server-logs">View GitHub job logs</button>`):"";
   const runs=state.overview?.runs||[];
   const recent=runs.slice(0,5);
   const actions=`<div class="columns">
@@ -261,8 +307,8 @@ async function loadOverview(quiet=false){
   catch(e){if(!quiet)flash(errorText(e));}
 }
 async function loadCloud(quiet=true){
-  try{state.cloud=await run("cloudflare_status",{}, {quiet});state.cloudError=null;}
-  catch(e){state.cloudError=errorText(e);state.cloud=null;}
+  try{state.cloud=await run("cloudflare_status",{}, {quiet});state.cloudFetchedAt=Date.now();state.cloudError=null;}
+  catch(e){state.cloudError=errorText(e);state.cloud=null;state.cloudFetchedAt=0;}
 }
 async function loadGithubServerLog(quiet=true){
   if(!state.github.connected||state.logBusy)return;
@@ -434,10 +480,25 @@ document.addEventListener("submit",async ev=>{
 });
 $("#refresh").addEventListener("click",()=>refresh());
 setInterval(()=>{$("#time").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});},1000);
-setInterval(async()=>{
-  if(document.visibilityState!=="visible")return;
-  await loadDirect(true);
-  if(["overview","console","connections"].includes(state.page)&&!editing())render();
-},4000);
-setInterval(()=>{if(document.visibilityState==="visible")refresh(true)},12000);
+// Smooth client-side counters update once per second without network traffic.
+setInterval(tickLiveUI,1000);
+// Poll live telemetry independently of the expensive GitHub workflow API.
+// Cloudflare acts as fallback when NetBird is not connected.
+let livePollPending=false;
+async function pollLiveTelemetry(){
+  if(document.visibilityState!=="visible"||livePollPending||state.busy)return;
+  livePollPending=true;
+  try{
+    await Promise.all([loadCloud(true),loadDirect(true)]);
+    if(state.page==="console")updateConsoleOutput();
+    if(["overview","connections"].includes(state.page)&&!editing())render();
+    tickLiveUI();
+  }finally{livePollPending=false;}
+}
+setInterval(pollLiveTelemetry,2000);
+// GitHub metadata and backups need much less frequent refreshes.
+setInterval(()=>{if(document.visibilityState==="visible")refresh(true)},30000);
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible"){pollLiveTelemetry();tickLiveUI();}
+});
 startApp();
