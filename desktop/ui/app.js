@@ -33,6 +33,8 @@ function updateMessage(message,kind="info"){
   syncUpdateButton();
   const label=$("#updateStatus");
   if(label)label.textContent=message;
+  const details=$("#updateStatusConnections");
+  if(details)details.textContent=message;
 }
 function syncUpdateButton(){
   const button=$("#quickUpdate");
@@ -45,6 +47,8 @@ function syncUpdateButton(){
   button.setAttribute("aria-busy",state.updateChecking?"true":"false");
   const label=$("#updateStatus");
   if(label)label.textContent=state.updateMessage||"";
+  const details=$("#updateStatusConnections");
+  if(details)details.textContent=state.updateMessage||"";
 }
 async function checkDesktopUpdate(silent=false){
   if(!state.github.connected){
@@ -282,7 +286,7 @@ function drawConnections(){
      ${state.cloudError?`<p class="field-tip" style="color:#c46b53">Last error: ${esc(state.cloudError)}</p>`:""}
    `)}</div>`+
    `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Direct Paper · NetBird</h2>${directOnline()?pill("● Private connection online",""):pill("○ Not connected","warn")}</div><p class="field-tip">Connect directly to your temporary GitHub Actions Paper runner. NetBird must be connected on your Windows PC. The app automatically discovers connected minecraft-paper-* peers after each restart. Live console and server metrics work without Cloudflare.</p><div class="notice good" style="margin-top:17px"><label for="netbirdAuto" style="display:flex;align-items:center;gap:12px;cursor:pointer"><input id="netbirdAuto" type="checkbox" ${state.netbirdAuto?.enabled?"checked":""} style="width:17px;height:17px;accent-color:#158b69"><span><strong>Automatically connect NetBird</strong><span style="display:block;font-size:11px;margin-top:5px">Connect on app launch and disconnect when it closes, only if Minecraft Cloud started the VPN itself.</span></span></label><div style="margin-top:9px;font-size:11px">NetBird: ${state.netbirdAuto?.connected?"Connected":"Not connected"} ${state.netbirdAuto?.ownedByApp?"· Managed by Minecraft Cloud":""}</div></div><div class="field" style="margin-top:16px"><label for="directToken">Direct-control secret</label><input id="directToken" type="password" autocomplete="off" placeholder="Value saved as MINECRAFT_DIRECT_TOKEN in GitHub Secrets"></div><div class="field"><label for="directPeer">Manual NetBird peer IP (optional)</label><input id="directPeer" placeholder="Leave blank for automatic discovery"></div><div class="header-actions" style="justify-content:flex-start"><button class="btn primary" data-action="connect-direct">Connect Direct Paper</button><button class="btn flat" data-action="test-direct">Test connection</button></div>${state.directError?`<p class="field-tip" style="color:#b96154;margin-top:12px">${esc(state.directError)}</p>`:""}</section>`+
-   `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Windows app updates</h2>${state.update?.available?pill("● New build available",""):pill("Installed app","muted")}</div><p class="field-tip">Check GitHub for the latest successful Windows installer. Quick Update upgrades your existing installation without manually downloading or extracting ZIP files. Your login remains saved on this PC.</p><div class="header-actions" style="justify-content:flex-start;margin-top:16px"><button class="btn primary" data-action="check-update">${state.update?.available?"Install update #"+state.update.runNumber:"↻ Quick Update"}</button><span class="field-tip" id="updateStatus">${esc(state.updateMessage|| (state.update?"Installed build "+(state.update.currentBuild||"legacy")+" · Latest build "+state.update.runNumber:"No update check performed yet"))}</span></div></section>`;
+   `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Windows app updates</h2>${state.update?.available?pill("● New build available",""):pill("Installed app","muted")}</div><p class="field-tip">Check GitHub for the latest successful Windows installer. Quick Update upgrades your existing installation without manually downloading or extracting ZIP files. Your login remains saved on this PC.</p><div class="header-actions" style="justify-content:flex-start;margin-top:16px"><button class="btn primary" data-action="check-update">${state.update?.available?"Install update #"+state.update.runNumber:"↻ Quick Update"}</button><span class="field-tip" id="updateStatusConnections">${esc(state.updateMessage|| (state.update?"Installed build "+(state.update.currentBuild||"legacy")+" · Latest build "+state.update.runNumber:"No update check performed yet"))}</span></div></section>`;
 }
 // Edits survive background telemetry updates, navigation, and incidental
 // rerenders. Never store typed secrets outside this running app process.
