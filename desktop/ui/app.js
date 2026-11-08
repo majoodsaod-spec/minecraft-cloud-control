@@ -260,6 +260,81 @@ function drawConsole(){
    +panel(online?"Paper live console":"GitHub Actions · read-only job logs",`<p class="field-tip" id="consoleTransport" role="status" style="margin:0 0 12px">${esc(consoleTransport())}</p><div class="header-actions" style="justify-content:flex-start;margin-bottom:12px"><button class="btn small flat" data-action="server-logs" ${githubFallback?"":"disabled"}>↻ Load GitHub logs</button><span class="field-tip">${esc(state.githubLogInfo||"GitHub job output is not a direct Paper connection")}</span></div><div class="console" id="terminal">${lines}</div><form id="consoleForm" class="console-form"><input id="commandText" placeholder="Enter a Paper console command…" autocomplete="off" aria-label="Paper console command" ${online?"":"disabled"}><button class="btn primary" ${online?"":"disabled"}>Send ↗</button></form>`);
   const term=$("#terminal");term.scrollTop=term.scrollHeight;
 }
+const marketplace={kind:"plugin",query:"",hits:[],loading:false,installing:"",notice:"",installed:[],searched:false};
+function drawMarketplace(){
+  const direct=directOnline();
+  const result=marketplace.hits.map(item=>{
+    const name=esc(item.title||item.slug||"Unknown project");
+    const id=esc(item.project_id||"");
+    const detail=esc((item.description||"").slice(0,180));
+    const author=esc(item.author||"");
+    const downloading=marketplace.installing===item.project_id;
+    return `<article class="mc-market-item"><div class="mc-market-info"><strong>${name}</strong><span class="field-tip">${author} · ${Number(item.downloads||0).toLocaleString()} downloads</span><p>${detail}</p></div><button class="btn primary" data-action="market-install" data-id="${id}" ${marketplace.installing?"disabled":""}>${downloading?"Installing…":"Install to server"}</button></article>`;
+  }).join("");
+  const kind=marketplace.kind;
+  const help=kind==="plugin"?
+    "Plugin files are installed directly into the server's plugins folder. Apply them with a safe restart.":
+    "Datapacks are installed into world/datapacks. Paper will be asked to reload Minecraft data automatically.";
+  $("#content").innerHTML=header("SERVER CONTENT","Plugins & Datapacks","Find compatible Modrinth content and install it directly onto your running Minecraft server.")+
+    panel("Modrinth marketplace",`<div class="header-actions" style="justify-content:flex-start;gap:8px;margin-bottom:15px">
+      <button class="btn ${kind==="plugin"?"primary":""}" data-action="market-type" data-id="plugin">Plugins</button>
+      <button class="btn ${kind==="datapack"?"primary":""}" data-action="market-type" data-id="datapack">Datapacks</button>
+      <span class="field-tip">Paper 26.3</span></div>
+      <form id="marketSearchForm" class="form-row"><input id="marketQuery" placeholder="Search Modrinth…" autocomplete="off" value="${esc(marketplace.query)}" aria-label="Search Modrinth"><button class="btn primary">Search</button></form>
+      <p class="field-tip" style="margin:12px 0">${esc(help)}</p>
+      ${!direct?notice("Connect Direct Paper through NetBird to install automatically. Modrinth search works without a server connection."): ""}
+      ${marketplace.notice?`<p class="notice" role="status">${esc(marketplace.notice)}</p>`:""}
+      ${marketplace.installed.length?`<div class="notice good" style="margin:12px 0"><strong>Installed this session:</strong> ${marketplace.installed.map(item=>esc(item.name)).join(", ")}.
+        ${marketplace.installed.some(x=>x.restartRequired)?'<button class="btn primary" data-action="market-restart">Safely restart to activate plugins</button>':"Datapack reload requested automatically."}</div>`:""}
+      <div class="mc-market-list">${marketplace.loading?'<p class="field-tip">Searching compatible releases…</p>':result||(marketplace.searched?'<p class="field-tip">No compatible results found. Try another name.</p>':'<p class="field-tip">Search for plugins or datapacks above.</p>')}</div>`);
+}
+async function searchMarketplace(){
+  if(marketplace.loading)return;
+  marketplace.query=$("#marketQuery")?.value.trim()??marketplace.query;
+  marketplace.loading=true;
+  marketplace.searched=true;
+  marketplace.notice="";
+  drawMarketplace();
+  try{
+    const data=await run("modrinth_search",{query:marketplace.query,kind:marketplace.kind},{quiet:true});
+    marketplace.hits=Array.isArray(data.hits)?data.hits:[];
+  }catch(error){
+    marketplace.hits=[];
+    marketplace.notice="Modrinth search failed: "+errorText(error);
+  }finally{
+    marketplace.loading=false;
+    if(state.page==="marketplace")drawMarketplace();
+  }
+}
+async function installMarketplace(projectId){
+  if(marketplace.installing)return;
+  if(!directOnline()){
+    marketplace.notice="Connect Direct Paper via NetBird first. Files are downloaded by the Minecraft server, not this computer.";
+    return drawMarketplace();
+  }
+  marketplace.installing=projectId;
+  marketplace.notice="Checking versions and installing on your Minecraft server…";
+  drawMarketplace();
+  try{
+    const versions=await run("modrinth_versions",{projectId,kind:marketplace.kind},{quiet:true});
+    if(!Array.isArray(versions)||!versions.length)throw Error("No compatible Paper 26.3 release found.");
+    const release=versions.find(v=>v.version_type==="release")||versions[0];
+    const answer=await run("direct_command",{kind:"marketplace-install",args:{
+      projectId,versionId:release.id,kind:marketplace.kind
+    }},{quiet:true});
+    const installed=answer?.result;
+    if(!answer?.ok||!installed?.installed)throw Error("Server did not confirm installation");
+    marketplace.installed=[...marketplace.installed.filter(v=>v.file!==installed.file),installed];
+    marketplace.notice=installed.kind==="plugin"?
+      installed.name+" installed on server. Safe restart required to activate.":
+      installed.name+" installed. Minecraft datapack reload requested automatically.";
+  }catch(error){
+    marketplace.notice="Installation failed: "+errorText(error);
+  }finally{
+    marketplace.installing="";
+    if(state.page==="marketplace")drawMarketplace();
+  }
+}
 function drawFiles(){
   const f=state.file,isLoaded=f&&f.path===state.filePath,editable=!!f?.content;
   let text="";
@@ -317,13 +392,13 @@ function editing(){
   return el&&["INPUT","TEXTAREA","SELECT"].includes(el.tagName);
 }
 function render(){
-  const titles={overview:"Overview",console:"Live Console",workflows:"GitHub Actions",files:"Repository Files",backups:"World Backups",connections:"Connections"};
+  const titles={overview:"Overview",console:"Live Console",workflows:"GitHub Actions",files:"Repository Files",marketplace:"Plugins & Datapacks",backups:"World Backups",connections:"Connections"};
   $("#breadcrumb").textContent=titles[state.page]||"Overview";
   document.querySelectorAll(".nav").forEach(el=>el.classList.toggle("active",el.dataset.page===state.page));
   $("#githubDot").classList.toggle("ok",state.github.connected);$("#githubShort").textContent=state.github.connected?"GitHub connected":"GitHub not connected";
   $("#cloudDot").classList.toggle("ok",connectedLive());$("#cloudDot").classList.toggle("warn",!connectedLive()&&!!state.cloud);
   $("#cloudShort").textContent=connectedLive()?"Live bridge online":"Live bridge unavailable";
-  const pages={overview:drawOverview,console:drawConsole,workflows:drawWorkflows,files:drawFiles,backups:drawBackups,connections:drawConnections};
+  const pages={overview:drawOverview,console:drawConsole,workflows:drawWorkflows,files:drawFiles,marketplace:drawMarketplace,backups:drawBackups,connections:drawConnections};
   (pages[state.page]||drawOverview)();
   restoreDrafts();
   syncUpdateButton();
@@ -423,6 +498,19 @@ async function action(type,id){
   switch(type){
   case "refresh":return refresh();
   case "check-update":return quickUpdate();
+  case "market-type":
+    marketplace.kind=id;
+    marketplace.hits=[];
+    marketplace.searched=false;
+    marketplace.notice="";
+    return drawMarketplace();
+  case "market-install":return installMarketplace(id);
+  case "market-restart":{
+    if(!connectedLive())return flash("Server must be connected to restart safely.");
+    if(!await dialog("Safely restart Paper?","Players will be kicked, the world saved and backed up, and the server restarted to load your newly installed plugins."))return;
+    try{await sendPaper("restart");flash("Safe plugin activation restart requested.");}catch{}
+    return;
+  }
   case "server-logs":{
     if(!state.github.connected)return flash("Connect GitHub first.");
     state.page="console";state.githubLog=null;state.githubLogError=null;
@@ -554,6 +642,11 @@ document.addEventListener("change",ev=>{
   if(ev.target?.id==="netbirdAuto")action("netbird-auto");
 });
 document.addEventListener("submit",async ev=>{
+  if(ev.target.id==="marketSearchForm"){
+    ev.preventDefault();
+    await searchMarketplace();
+    return;
+  }
   if(ev.target.id!=="consoleForm")return;
   ev.preventDefault();const cmd=$("#commandText").value.trim();if(!cmd)return;
   try{await sendPaper("console",{command:cmd});clearDrafts("commandText");$("#commandText").value="";flash("Command sent to Paper.");setTimeout(()=>refresh(true),1000);}catch{}
