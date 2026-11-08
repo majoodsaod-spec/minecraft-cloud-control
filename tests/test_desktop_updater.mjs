@@ -10,6 +10,16 @@ const build=read("desktop/src-tauri/build.rs");
 const workflow=read(".github/workflows/build-windows.yml");
 const config=JSON.parse(read("desktop/src-tauri/tauri.conf.json"));
 
+test("Quick Update gives immediate visible feedback and installs in one interaction",()=>{
+  assert.match(ui,/case "check-update":return quickUpdate\(\)/);
+  assert.match(ui,/updateMessage\("Checking GitHub for the newest Windows installer/);
+  assert.match(ui,/desktop-update-progress/);
+  assert.match(ui,/stage==="downloading"/);
+  assert.match(ui,/state\.updateChecking/);
+  assert.match(html,/id="updateStatus"[^>]*role="status"|id="updateStatus"[^>]*aria-live=/);
+  assert.match(rust,/app\.emit\("desktop-update-progress"/);
+});
+
 test("Quick Update is wired to the native backend and visible in the toolbar",()=>{
   assert.doesNotThrow(()=>new Function(ui));
   assert.match(html,/id="quickUpdate"[^>]+data-action="check-update"/);
