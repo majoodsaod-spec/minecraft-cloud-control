@@ -9,6 +9,7 @@ from __future__ import annotations
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import socket
 import os
 import threading
 import time
@@ -86,6 +87,9 @@ class DirectControl:
                 # Private, bearer-authenticated SSE. Emit immediately on a log,
                 # player, readiness or phase change, with a periodic telemetry
                 # sample. Never expose the endpoint on a public interface.
+                # Disable Nagle coalescing of small SSE frames; logs should
+                # reach the connected desktop without waiting for more bytes.
+                self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache, no-transform")
@@ -109,7 +113,7 @@ class DirectControl:
                             self.wfile.flush()
                             previous = content
                             last_sent = now
-                        time.sleep(0.15)
+                        time.sleep(0.05)
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
                     return
 
