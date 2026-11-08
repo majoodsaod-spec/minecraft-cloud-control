@@ -392,6 +392,68 @@ async fn cloudflare_command(kind:String)->Result<Value,String> {
     if !response.status().is_success(){return Err(format!("Live control HTTP {}",response.status().as_u16()));}
     response.json().await.map_err(|_|"Invalid control reply".into())
 }
+async fn dashboard_power_action(action:&str,run_id:Option<u64>)->Result<Value,String>{
+    let url=cf_url()?;let pass=secret(CF_PASSWORD)?;
+    let mut body=json!({});
+    if let Some(run)=run_id{body["run_id"]=json!(run)}
+    let response=http().post(format!("{url}/api/control?action={action}"))
+        .header("X-Admin-Password",pass).json(&body).send().await
+        .map_err(|_|"Dashboard unavailable. Automatic restore requires a configured Cloudflare connection".to_owned())?;
+    let code=response.status();
+    let result=response.json::<Value>().await.map_err(|_|"Invalid dashboard restore response")?;
+    if !code.is_success(){return Err(format!("Restore request rejected (HTTP {}): {}",
+        code.as_u16(),result["error"].as_str().unwrap_or("Unknown error")))}
+    Ok(result)
+}
+#[tauri::command]
+async fn server_restore_backup(app:tauri::AppHandle,run_id:u64)->Result<Value,String>{
+    if run_id==0{return Err("Select a valid backup".into())}
+    // Verify the snapshot before modifying power state.
+    let artifacts=github("/actions/artifacts?name=minecraft-world&per_page=100",
+        reqwest::Method::GET,None).await?;
+    let valid=artifacts["artifacts"].as_array().map(|a|a.iter().any(|v|
+        v["name"]=="minecraft-world"&&v["expired"]==false&&
+        v["workflow_run"]["id"].as_u64()==Some(run_id))).unwrap_or(false);
+    if !valid{return Err("Selected world backup is expired or unavailable".into())}
+    let runs=github(&format!("/actions/workflows/{SERVER_WORKFLOW}/runs?per_page=30"),
+        reqwest::Method::GET,None).await?;
+    let active=runs["workflow_runs"].as_array()
+        .map(|a|a.iter().filter(|r|["in_progress","queued","waiting","pending","requested"]
+        .contains(&r["status"].as_str().unwrap_or("")))
+        .filter_map(|r|r["id"].as_u64()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    if !active.is_empty(){
+        let _=app.emit("server-restore-progress",json!({"stage":"saving",
+            "message":"Saving current world and stopping Paper before restore…"}));
+        dashboard_power_action("stop",None).await?;
+        let started=std::time::Instant::now();
+        loop{
+            if started.elapsed()>std::time::Duration::from_secs(540){
+                return Err("The safe shutdown has not finished. No restore was started. Check the world backup workflow.".into())
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(7)).await;
+            let latest=github(&format!("/actions/workflows/{SERVER_WORKFLOW}/runs?per_page=30"),
+                reqwest::Method::GET,None).await?;
+            let pending=latest["workflow_runs"].as_array().map(|items|
+                items.iter().any(|r|["in_progress","queued","waiting","pending","requested"]
+                .contains(&r["status"].as_str().unwrap_or("")))).unwrap_or(true);
+            if pending{continue}
+            let failed=active.iter().any(|id|latest["workflow_runs"].as_array().map(|items|
+                items.iter().any(|r|r["id"].as_u64()==Some(*id)&&r["conclusion"]!="success"))
+                .unwrap_or(true));
+            if failed{
+                return Err("Server shutdown did not complete successfully. World restore aborted to protect the saved world.".into())
+            }
+            break;
+        }
+    }
+    let _=app.emit("server-restore-progress",json!({"stage":"restoring",
+        "message":"Starting Paper from the selected verified world backup…"}));
+    let result=dashboard_power_action("restore",Some(run_id)).await?;
+    let _=app.emit("server-restore-progress",json!({"stage":"requested",
+        "message":"World restore requested. Watch the new GitHub runner startup."}));
+    Ok(result)
+}
 #[tauri::command]
 async fn cloudflare_console(command:String)->Result<Value,String> {
     if command.is_empty()||command.len()>240||command.contains('\n')||command.contains('\r'){
@@ -1088,6 +1150,7 @@ pub fn run() {
             server_files_list,server_files_read,server_settings_get,server_settings_save,
             desktop_check_update,desktop_install_update,
             configure_cloudflare,cloudflare_status,cloudflare_command,cloudflare_console,
+            server_restore_backup,
             direct_configure,direct_peer_config,direct_clear_peer,direct_status,direct_start_stream,direct_command,
             modrinth_search,modrinth_versions,
             netbird_auto_status,netbird_set_auto
