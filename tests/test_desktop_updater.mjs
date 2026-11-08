@@ -162,3 +162,21 @@ test("a stored NetBird manual override is visible and can be cleared without re-
   assert.match(ui,/state\.directPeerConfig\.peerIp/);
   assert.match(ui,/await loadDirectPeerConfig\(\)/);
 });
+
+test("Uptime stays monotonic and does not reset when NetBird SSE reconnects",()=>{
+  assert.match(ui,/const liveClock=\{/);
+  assert.match(ui,/function observeLiveClock\(/);
+  assert.match(ui,/liveClock\.uptimeBase=Math\.max\(/);
+  assert.match(ui,/observeLiveClock\(next,state\.directFetchedAt\)/);
+  assert.match(ui,/if\(!directOnline\(\)\)observeLiveClock\(state\.cloud/);
+  assert.match(ui,/Keep the existing/);
+});
+test("Automatic NetBird discovery verifies the control API rather than trusting a stale peer name",()=>{
+  assert.match(rust,/async fn selected_direct_peer_ip\(\)/);
+  assert.match(rust,/static VERIFIED_PEER:/);
+  assert.match(rust,/netbird_cli_args\(&binary,&\["status","--json"\]\)/);
+  assert.match(rust,/api\/status/);
+  assert.match(rust,/\.bearer_auth\(&token\)/);
+  assert.match(rust,/response\.status\(\)\.is_success\(\)/);
+  assert.match(rust,/cache\.lock\(\)\.await=Some/);
+});
