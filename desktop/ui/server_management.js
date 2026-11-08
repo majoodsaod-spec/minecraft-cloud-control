@@ -182,7 +182,7 @@ async function loadSettings(){
  state.settingLoading=true;
  try{state.settingData=await invoke("server_settings_get");state.settingError="";state.settingsLoaded=true;}
  catch(e){state.settingError=String(e);}
- finally{state.settingLoading=false;if(document.querySelector(".settings-page"))renderSettings();}
+ finally{state.settingLoading=false;state.settingsLoaded=true;if(document.querySelector(".settings-page"))renderSettings();}
 }
 async function saveSettings(){
  if(!state.settingData||state.settingSaving)return;
