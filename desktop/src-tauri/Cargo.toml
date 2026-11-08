@@ -20,6 +20,8 @@ keyring = { version = "3.6", features = ["windows-native"] }
 dirs = "6"
 futures-util = "0.3"
 urlencoding = "2.1"
+base64 = "0.22"
+sha2 = "0.10"
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 
 [build-dependencies]
