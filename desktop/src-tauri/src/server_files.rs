@@ -1,0 +1,226 @@
+use std::io::{Read,Cursor};
+use std::sync::Arc;
+use base64::Engine;
+use sha2::{Digest,Sha256};
+
+const STAGED_FILES:&str="server/pending-files.json";
+const BACKUP_LIMIT:usize=240*1024*1024;
+const TEXT_LIMIT:usize=128*1024;
+static FILE_BACKUP:OnceLock<tokio::sync::Mutex<Option<(u64,Arc<Vec<u8>>)>>> = OnceLock::new();
+
+fn safe_server_file(path:&str,write:bool)->bool {
+    if path.is_empty() {return !write;}
+    if !valid_path(path){return false;}
+    let parts=path.split('/').collect::<Vec<_>>();
+    if parts.iter().any(|p|p.starts_with('.')
+        || ["playerdata","stats","advancements","cache","libraries","logs","crash-reports"].contains(p)){return false;}
+    let name=parts.last().copied().unwrap_or("");
+    if ["key.pem","eula.txt","usercache.json","ops.json","whitelist.json",
+        "banned-players.json","banned-ips.json","credentials.json","secrets.json"].contains(&name){return false;}
+    if parts.len()>=3&&parts[0]=="plugins"&&parts[1].eq_ignore_ascii_case("Geyser-Spigot")&&name=="config.yml"{return false;}
+    if write {
+        if parts.iter().any(|p|*p=="world"||p.starts_with("world_")){return false;}
+        if name=="server.properties"{return false;}
+        if !["txt","json","yml","yaml","properties","conf","cfg","toml","md"].contains(&name.rsplit('.').next().unwrap_or("")){return false;}
+    }
+    true
+}
+fn decode_content(value:&Value)->Result<String,String>{
+    let value=value["content"].as_str().ok_or("No file contents returned by GitHub")?;
+    let compact=value.chars().filter(|c|!c.is_whitespace()).collect::<String>();
+    let bytes=base64::engine::general_purpose::STANDARD.decode(compact)
+        .map_err(|_|"Invalid GitHub file encoding")?;
+    String::from_utf8(bytes).map_err(|_|"File is not valid UTF-8".into())
+}
+fn encode_content(text:&str)->String{base64::engine::general_purpose::STANDARD.encode(text.as_bytes())}
+async fn pending_files()->Result<(Value,String),String>{
+    let file=github(&format!("/contents/{STAGED_FILES}?ref=main"),reqwest::Method::GET,None).await?;
+    let value=serde_json::from_str::<Value>(&decode_content(&file)?)
+        .map_err(|_|"Invalid staged file manifest")?;
+    if !value.is_object(){return Err("Staged file manifest is not an object".into())}
+    Ok((value,file["sha"].as_str().ok_or("Missing staged file revision")?.to_owned()))
+}
+#[tauri::command]
+async fn server_files_pending()->Result<Value,String>{
+    Ok(pending_files().await?.0)
+}
+#[tauri::command]
+async fn server_files_stage(path:String,content:String)->Result<Value,String>{
+    if !safe_server_file(&path,true){return Err("This path is protected. Use Server Settings for server.properties. World files are read-only.".into())}
+    if content.len()>TEXT_LIMIT||content.contains('\0'){return Err("Only UTF-8 text up to 128 KiB can be staged".into())}
+    let (mut manifest,sha)=pending_files().await?;
+    if manifest.as_object().map(|m|m.len()>250).unwrap_or(true){return Err("Too many staged files".into())}
+    manifest.as_object_mut().unwrap().insert(path.clone(),json!(content));
+    let data=serde_json::to_string_pretty(&manifest).map_err(|_|"Cannot serialize staged files")?;
+    if data.len()>800_000{return Err("Staged files exceed repository limit".into())}
+    github(&format!("/contents/{STAGED_FILES}"),reqwest::Method::PUT,
+        Some(json!({"branch":"main","sha":sha,"message":"Queue server file edits for next Paper session",
+        "content":encode_content(&(data+"\n"))}))).await?;
+    Ok(json!({"ok":true,"path":path,"nextSession":true}))
+}
+#[tauri::command]
+async fn server_files_unstage(path:String)->Result<Value,String>{
+    if !safe_server_file(&path,true){return Err("Invalid staged file path".into())}
+    let (mut manifest,sha)=pending_files().await?;
+    manifest.as_object_mut().unwrap().remove(&path);
+    let data=serde_json::to_string_pretty(&manifest).map_err(|_|"Invalid staged files")?;
+    github(&format!("/contents/{STAGED_FILES}"),reqwest::Method::PUT,
+        Some(json!({"branch":"main","sha":sha,"message":"Discard queued server file edit",
+        "content":encode_content(&(data+"\n"))}))).await?;
+    Ok(json!({"ok":true}))
+}
+async fn verified_backup()->Result<(u64,Arc<Vec<u8>>),String>{
+    let artifacts=github("/actions/artifacts?name=minecraft-world&per_page=50",reqwest::Method::GET,None).await?;
+    let chosen=artifacts["artifacts"].as_array().ok_or("Backup listing unavailable")?
+        .iter().filter(|a|a["name"]=="minecraft-world"&&a["expired"]==false)
+        .max_by_key(|a|a["created_at"].as_str().unwrap_or(""))
+        .ok_or("No verified server backup exists yet")?;
+    let id=chosen["id"].as_u64().ok_or("Missing backup ID")?;
+    let cache=FILE_BACKUP.get_or_init(||tokio::sync::Mutex::new(None));
+    {
+        let guard=cache.lock().await;
+        if let Some((cached,bytes))=&*guard {if *cached==id{return Ok((id,Arc::clone(bytes)))}}
+    }
+    let token=secret(GITHUB_SECRET)?;
+    let response=http().get(format!("https://api.github.com/repos/{REPO}/actions/artifacts/{id}/zip"))
+        .bearer_auth(token).header("Accept","application/vnd.github+json")
+        .send().await.map_err(|_|"Unable to retrieve the world backup")?;
+    if !response.status().is_success(){return Err(format!("Backup download HTTP {}",response.status().as_u16()))}
+    if response.content_length().unwrap_or(0)>BACKUP_LIMIT as u64{return Err("Backup exceeds 240 MiB viewer limit".into())}
+    let mut outer=Vec::new();
+    let mut chunks=response.bytes_stream();
+    while let Some(part)=chunks.next().await{
+        let part=part.map_err(|_|"Backup transfer interrupted")?;
+        if outer.len()+part.len()>BACKUP_LIMIT{return Err("Backup exceeds 240 MiB viewer limit".into())}
+        outer.extend_from_slice(&part);
+    }
+    let inner=tokio::task::spawn_blocking(move||->Result<Vec<u8>,String>{
+        let mut artifact=zip::ZipArchive::new(Cursor::new(outer)).map_err(|_|"Invalid GitHub artifact ZIP")?;
+        let mut inner=Vec::new();
+        {
+            let backup=artifact.by_name("worlds.zip").map_err(|_|"Backup missing worlds.zip")?;
+            backup.take(BACKUP_LIMIT as u64+1).read_to_end(&mut inner)
+                .map_err(|_|"Cannot extract server snapshot")?;
+        }
+        if inner.len()>BACKUP_LIMIT{return Err("Uncompressed snapshot exceeds limit".into())}
+        let mut expected=String::new();
+        {
+            let hash=artifact.by_name("worlds.zip.sha256").map_err(|_|"Backup missing checksum")?;
+            hash.take(256).read_to_string(&mut expected).map_err(|_|"Cannot read backup checksum")?;
+        }
+        if format!("{:x}",Sha256::digest(&inner))!=expected.trim(){
+            return Err("Backup SHA-256 mismatch; refusing to open".into());
+        }
+        Ok(inner)
+    }).await.map_err(|_|"Backup verification thread failed")??;
+    let inner=Arc::new(inner);
+    *cache.lock().await=Some((id,Arc::clone(&inner)));
+    Ok((id,inner))
+}
+fn browse_backup(bytes:&[u8],folder:&str,file:Option<&str>)->Result<Value,String>{
+    let mut archive=zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_|"Invalid world snapshot")?;
+    if let Some(path)=file{
+        if !safe_server_file(path,false){return Err("Protected server file".into())}
+        if !["txt","json","yml","yaml","properties","conf","cfg","toml","md","log"]
+            .contains(&path.rsplit('.').next().unwrap_or("")){return Err("This file isn't text".into())}
+        let f=archive.by_name(path).map_err(|_|"File not found in backup")?;
+        if f.size()>TEXT_LIMIT as u64{return Err("File too large to preview".into())}
+        let mut content=String::new();
+        f.take(TEXT_LIMIT as u64+1).read_to_string(&mut content)
+            .map_err(|_|"Unable to read UTF-8 file")?;
+        return Ok(json!({"path":path,"content":content,"source":"backup"}))
+    }
+    let prefix=if folder.is_empty(){String::new()}else{format!("{folder}/")};
+    let mut items=std::collections::BTreeMap::<String,Value>::new();
+    for i in 0..archive.len(){
+        let entry=archive.by_index(i).map_err(|_|"Invalid backup entry")?;
+        let name=entry.name().trim_end_matches('/');
+        if !name.starts_with(&prefix)||!safe_server_file(name,false){continue}
+        let rest=&name[prefix.len()..];
+        let first=rest.split('/').next().unwrap_or("");
+        if first.is_empty(){continue}
+        let path=format!("{prefix}{first}");
+        let dir=rest.contains('/')||entry.is_dir();
+        items.entry(first.into()).or_insert_with(||
+            json!({"name":first,"path":path,"type":if dir{"dir"}else{"file"},
+                "size":if dir{Value::Null}else{json!(entry.size())}}));
+        if items.len()>=500{break}
+    }
+    let mut entries=items.into_values().collect::<Vec<_>>();
+    entries.sort_by_key(|v|(v["type"].as_str()!=Some("dir"),
+        v["name"].as_str().unwrap_or("").to_ascii_lowercase()));
+    Ok(json!({"path":folder,"entries":entries,"source":"backup","truncated":entries.len()>=500}))
+}
+#[tauri::command]
+async fn server_files_list(path:String,live:bool)->Result<Value,String>{
+    if !safe_server_file(&path,false){return Err("Invalid server directory".into())}
+    if live{
+        let response=direct_request("command",Some(json!({"type":"files-list","args":{"path":path}}))).await?;
+        if response["ok"]!=true{return Err("Server file listing failed".into())}
+        let mut result=response["result"].clone();result["source"]=json!("live");
+        return Ok(result)
+    }
+    let (artifact,backup)=verified_backup().await?;
+    let path_copy=path.clone();
+    let mut result=tokio::task::spawn_blocking(move||browse_backup(&backup,&path_copy,None))
+        .await.map_err(|_|"Backup file index failed")??;
+    result["artifactId"]=json!(artifact);
+    Ok(result)
+}
+#[tauri::command]
+async fn server_files_read(path:String,live:bool)->Result<Value,String>{
+    if !safe_server_file(&path,false){return Err("Protected server file".into())}
+    if live{
+        let response=direct_request("command",Some(json!({"type":"files-read","args":{"path":path}}))).await?;
+        if response["ok"]!=true{return Err("Server file read failed".into())}
+        let mut result=response["result"].clone();result["source"]=json!("live");
+        return Ok(result)
+    }
+    let (artifact,backup)=verified_backup().await?;
+    let mut result=tokio::task::spawn_blocking(move||browse_backup(&backup,"",Some(&path)))
+        .await.map_err(|_|"Backup read failed")??;
+    result["artifactId"]=json!(artifact);
+    Ok(result)
+}
+#[tauri::command]
+async fn server_settings_get()->Result<Value,String>{
+    let file=github("/contents/server/server.properties?ref=main",reqwest::Method::GET,None).await?;
+    let text=decode_content(&file)?;
+    let mut values=serde_json::Map::new();
+    for line in text.lines(){
+        if line.starts_with('#'){continue;}
+        if let Some((k,v))=line.split_once('='){values.insert(k.trim().to_owned(),json!(v.trim()));}
+    }
+    Ok(json!({"properties":values,"sha":file["sha"]}))
+}
+#[tauri::command]
+async fn server_settings_save(properties:Value,sha:String)->Result<Value,String>{
+    let edits=properties.as_object().ok_or("Settings must be an object")?;
+    if edits.len()>150||sha.len()!=40{return Err("Invalid settings revision".into())}
+    let previous=server_settings_get().await?;
+    if previous["sha"].as_str()!=Some(&sha){return Err("Settings changed elsewhere. Reload before saving".into())}
+    let mut values=previous["properties"].as_object().ok_or("Invalid settings file")?.clone();
+    for (key,value) in edits{
+        if key.is_empty()||key.len()>64||!key.chars().all(|c|c.is_ascii_alphanumeric()||c=='-'){
+            return Err("Invalid setting name".into())
+        }
+        let val=match value{
+            Value::Bool(b)=>b.to_string(),Value::Number(n)=>n.to_string(),
+            Value::String(s)=>s.clone(),_=>return Err(format!("Invalid setting {key}"))
+        };
+        if val.len()>200||val.contains('\n')||val.contains('\r')||val.contains('\0'){
+            return Err(format!("Invalid setting value for {key}"))
+        }
+        if key=="online-mode" && val!="true"{return Err("Online mode must remain enabled to protect player identities and saved inventories".into())}
+        values.insert(key.to_owned(),json!(val));
+    }
+    values.insert("online-mode".into(),json!("true"));
+    let mut output=String::new();
+    for (key,value) in values{
+        output.push_str(&format!("{key}={}\n",value.as_str().unwrap_or("")));
+    }
+    github("/contents/server/server.properties",reqwest::Method::PUT,
+        Some(json!({"branch":"main","sha":sha,"message":"Update Minecraft server settings from desktop",
+        "content":encode_content(&output)}))).await?;
+    Ok(json!({"ok":true,"nextSession":true}))
+}
