@@ -726,7 +726,10 @@ async fn direct_request(kind: &str, command: Option<Value>) -> Result<Value, Str
     let ip=tokio::task::spawn_blocking(direct_peer_ip)
         .await.map_err(|_|"NetBird peer lookup failed".to_owned())??;
     let url=format!("http://{ip}:8765/api/{kind}");
-    let client=direct_client()?;
+    let mut client_builder=reqwest::Client::builder().no_proxy();
+    let is_install=command.as_ref().and_then(|body|body.get("type")).and_then(Value::as_str)==Some("marketplace-install");
+    client_builder=client_builder.timeout(std::time::Duration::from_secs(if is_install { 150 } else { 12 }));
+    let client=client_builder.build().map_err(|_|"Couldn't create private connection".to_owned())?;
     let req=match command {
         Some(body)=>client.post(url).json(&body),
         None=>client.get(url)
@@ -825,6 +828,52 @@ async fn direct_start_stream(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 #[tauri::command]
+async fn modrinth_search(query: String, kind: String) -> Result<Value, String> {
+    if !["plugin","datapack"].contains(&kind.as_str()) || query.len()>100 {
+        return Err("Invalid Modrinth search".into());
+    }
+    let facets = if kind=="plugin" {
+        r#"[["all_project_types:plugin"],["versions:26.3"]]"#
+    } else {
+        r#"[["all_project_types:datapack"],["versions:26.3"]]"#
+    };
+    let response=http().get("https://api.modrinth.com/v2/search")
+        .query(&[("query",query.as_str()),("facets",facets),("limit","20")])
+        .send().await.map_err(|_|"Modrinth search is unavailable".to_owned())?;
+    if !response.status().is_success() {
+        return Err(format!("Modrinth search HTTP {}", response.status().as_u16()));
+    }
+    response.json().await.map_err(|_|"Invalid Modrinth search results".into())
+}
+#[tauri::command]
+async fn modrinth_versions(project_id: String, kind: String) -> Result<Value, String> {
+    if project_id.len()<3 || project_id.len()>32 ||
+       !project_id.chars().all(|c| c.is_ascii_alphanumeric()) ||
+       !["plugin","datapack"].contains(&kind.as_str()) {
+        return Err("Invalid Modrinth project".into());
+    }
+    let url=format!("https://api.modrinth.com/v2/project/{project_id}/version");
+    let response=http().get(url)
+        .query(&[("game_versions",r#"["26.3"]"#),("include_changelog","false")])
+        .send().await.map_err(|_|"Modrinth versions are unavailable".to_owned())?;
+    if !response.status().is_success() {
+        return Err(format!("Modrinth versions HTTP {}",response.status().as_u16()));
+    }
+    let versions=response.json::<Value>().await.map_err(|_|"Invalid Modrinth versions".to_owned())?;
+    let compatible=versions.as_array().ok_or("Invalid versions response")?
+        .iter().filter(|v| {
+            let loaders=v["loaders"].as_array();
+            let supported=loaders.map(|items| items.iter().any(|l| {
+                let l=l.as_str().unwrap_or("");
+                if kind=="plugin" { ["paper","spigot","bukkit","purpur"].contains(&l) }
+                else { l=="datapack" }
+            })).unwrap_or(false);
+            supported && v["game_versions"].as_array().map(|games|
+                games.iter().any(|g|g.as_str()==Some("26.3"))).unwrap_or(false)
+        }).cloned().collect::<Vec<_>>();
+    Ok(Value::Array(compatible))
+}
+#[tauri::command]
 async fn direct_status() -> Result<Value, String> { direct_request("status",None).await }
 #[tauri::command]
 async fn direct_command(kind: String, args: Value) -> Result<Value, String> {
@@ -833,7 +882,7 @@ async fn direct_command(kind: String, args: Value) -> Result<Value, String> {
         "whitelist-add","whitelist-remove","whitelist-on","whitelist-off",
         "op","deop","plugins-list","files-list","files-tree","files-read",
         "files-write","files-delete","files-mkdir","files-rename",
-        "files-upload","files-download",
+        "files-upload","files-download","marketplace-install",
     ];
     if !ALLOWED.contains(&kind.as_str()) { return Err("Unsupported Paper command".into());}
     if !args.is_object(){return Err("Invalid command arguments".into());}
@@ -862,6 +911,7 @@ pub fn run() {
             desktop_check_update,desktop_install_update,
             configure_cloudflare,cloudflare_status,cloudflare_command,cloudflare_console,
             direct_configure,direct_status,direct_start_stream,direct_command,
+            modrinth_search,modrinth_versions,
             netbird_auto_status,netbird_set_auto
         ])
         .build(tauri::generate_context!())
