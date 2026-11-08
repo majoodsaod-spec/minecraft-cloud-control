@@ -1,0 +1,51 @@
+"""Apply staged text changes to the restored server snapshot before Paper starts.
+
+The GitHub Actions backup remains immutable. Only files in server/pending-files.json
+are applied, with strict path / content protection. Changes remain queued in
+GitHub across later sessions, so the repo overlay is a stable source of truth.
+"""
+from pathlib import Path
+import json
+import re
+
+TEXT={".txt",".json",".yml",".yaml",".properties",".conf",".cfg",".toml",".md"}
+PROTECTED={"key.pem","usercache.json","ops.json","whitelist.json",
+           "banned-players.json","banned-ips.json","eula.txt","credentials.json",
+           "secrets.json","server.properties"}
+FORBIDDEN={"playerdata","advancements","stats","cache","libraries","logs","crash-reports"}
+PATTERN=re.compile(r"^[a-zA-Z0-9_.\-/]+$")
+
+def safe_path(name):
+    if not isinstance(name,str) or not 0<len(name)<=180 or not PATTERN.fullmatch(name):
+        raise ValueError("Invalid staged filename")
+    parts=Path(name).parts
+    if Path(name).is_absolute() or any(p in ("",".","..") or p.startswith(".") for p in parts):
+        raise ValueError("Unsafe staged path")
+    if any(p in FORBIDDEN or p=="world" or p.startswith("world_") for p in parts):
+        raise ValueError("World and player data cannot be staged")
+    if Path(name).name in PROTECTED or Path(name).suffix.lower() not in TEXT:
+        raise ValueError("Protected or non-text staged file")
+    if len(parts)>2 and parts[0]=="plugins" and parts[1].lower()=="geyser-spigot" and parts[-1]=="config.yml":
+        raise ValueError("Protected Geyser configuration")
+    return name
+
+def apply_pending(data:Path,manifest:Path):
+    if not manifest.is_file():return 0
+    changes=json.loads(manifest.read_text(encoding="utf-8"))
+    if not isinstance(changes,dict) or len(changes)>250:
+        raise ValueError("Invalid server file overlay")
+    # Validate all changes before applying any; refuse untrusted paths.
+    verified=[]
+    for name,value in changes.items():
+        safe_path(name)
+        if not isinstance(value,str) or "\0" in value or len(value.encode("utf-8"))>131072:
+            raise ValueError("Invalid staged file contents")
+        target=(data/name).resolve()
+        if not target.is_relative_to(data.resolve()):
+            raise ValueError("Staged path escapes server directory")
+        verified.append((target,value))
+    for target,value in verified:
+        target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_text(value,encoding="utf-8")
+    print(f"Applied {len(verified)} staged server text file(s) from repository overlay",flush=True)
+    return len(verified)
