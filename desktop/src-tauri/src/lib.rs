@@ -1,3 +1,4 @@
+#![recursion_limit = "512"]
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
