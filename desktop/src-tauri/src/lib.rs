@@ -788,7 +788,12 @@ async fn direct_start_stream(app: tauri::AppHandle) -> Result<(), String> {
                         if response.status().is_success() {
                             let mut stream = response.bytes_stream();
                             let mut buffer = String::new();
-                            while let Some(chunk) = stream.next().await {
+                            // Server emits a sample every second. If a
+                            // broken connection silently stalls, reconnect
+                            // instead of leaving the UI falsely marked live.
+                            while let Ok(Some(chunk)) = tokio::time::timeout(
+                                std::time::Duration::from_secs(8), stream.next()
+                            ).await {
                                 match chunk {
                                     Ok(bytes) => {
                                         buffer.push_str(&String::from_utf8_lossy(&bytes));
