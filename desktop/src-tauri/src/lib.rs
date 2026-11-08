@@ -701,6 +701,77 @@ fn find_netbird_peer() -> Result<String, String> {
     Err("No connected minecraft-paper runner is visible in NetBird. Check the Windows NetBird app's Peers list and that the GitHub runner belongs to an access group your PC can reach.".into())
 }
 
+// Select only the live Paper workflow's NetBird peer. Old transient runner
+// names remain in NetBird after their GitHub runner exits; choosing the newest
+// historical name can yield misleading TCP timeouts.
+static ACTIVE_PAPER_RUN: OnceLock<tokio::sync::Mutex<Option<(std::time::Instant, Option<u64>)>>> = OnceLock::new();
+
+async fn active_paper_run() -> Result<Option<u64>, String> {
+    let lock=ACTIVE_PAPER_RUN.get_or_init(||tokio::sync::Mutex::new(None));
+    let mut cached=lock.lock().await;
+    if let Some((last, id))=*cached {
+        if last.elapsed()<std::time::Duration::from_secs(30) {return Ok(id);}
+    }
+    let response=github("/actions/workflows/paper-state-test.yml/runs?status=in_progress&per_page=20",
+        reqwest::Method::GET,None).await?;
+    let runs=response["workflow_runs"].as_array()
+        .ok_or("GitHub did not list running Paper workflows")?;
+    let run=runs.iter().filter(|r|
+        r["status"].as_str()==Some("in_progress") &&
+        r["head_branch"].as_str()==Some("main")
+    ).filter_map(|r|r["id"].as_u64()).max();
+    *cached=Some((std::time::Instant::now(),run));
+    Ok(run)
+}
+
+fn find_active_netbird_peer(run_id:u64) -> Result<String,String> {
+    let binary=netbird_binary()?;
+    let report=netbird_cli_args(&binary,&["status","--json"])
+        .map_err(|_|"Cannot inspect NetBird peers. Open NetBird and verify it's connected.".to_owned())?;
+    let value:Value=serde_json::from_str(&report)
+        .map_err(|_|"NetBird peer metadata is invalid; please update NetBird.".to_owned())?;
+    let peers=value.pointer("/peers/details").and_then(Value::as_array)
+        .ok_or("NetBird did not return a peer list")?;
+    let mut stale=0_usize;
+    for peer in peers {
+        let Some(name)=peer["fqdn"].as_str() else {continue;};
+        let Some(id)=runner_peer_id(name) else {continue;};
+        let status=peer["status"].as_str().unwrap_or("").to_ascii_lowercase();
+        if id!=run_id {
+            stale+=1;
+            continue;
+        }
+        if status=="disconnected" {
+            return Err(format!("Current Paper runner #{run_id} is disconnected in NetBird. Check runner registration and NetBird network policies."));
+        }
+        let ip=peer["netbirdIp"].as_str().unwrap_or("");
+        if private_overlay_ip(ip) && ["connected","connecting","idle"].contains(&status.as_str()) {
+            return Ok(ip.to_owned());
+        }
+    }
+    Err(format!("The active Paper runner #{run_id} is not reachable as a NetBird peer. NetBird lists {stale} older Minecraft runner(s). Check the current GitHub runner's 'Connect private NetBird management network' step and NetBird access policies."))
+}
+
+async fn selected_direct_peer_ip() -> Result<String,String> {
+    // A manually configured peer is an explicit user override.
+    let manual=secret(DIRECT_PEER).unwrap_or_default();
+    if !manual.is_empty() {
+        if !private_overlay_ip(&manual) {return Err("Configured NetBird IP is invalid".into());}
+        return Ok(manual);
+    }
+    // A connected GitHub account provides the authoritative active run ID.
+    // On GitHub errors, keep the legacy discovery path as a fallback.
+    if secret(GITHUB_SECRET).is_ok() {
+        if let Some(id)=active_paper_run().await? {
+            return tokio::task::spawn_blocking(move || find_active_netbird_peer(id))
+                .await.map_err(|_|"NetBird discovery failed".to_owned())?;
+        }
+        return Err("No active Paper GitHub Actions runner. Start the Minecraft server before connecting NetBird.".into());
+    }
+    tokio::task::spawn_blocking(direct_peer_ip)
+        .await.map_err(|_|"NetBird peer discovery failed".to_owned())?
+}
+
 fn direct_peer_ip() -> Result<String, String> {
     let manual=secret(DIRECT_PEER).unwrap_or_default();
     if !manual.is_empty() {
@@ -723,8 +794,7 @@ async fn direct_request(kind: &str, command: Option<Value>) -> Result<Value, Str
     if token.len()<8 {return Err("Direct control token must be at least 8 characters".into());}
     // CLI peer discovery is a blocking OS process. Keep it off Tauri's
     // async executor so frequent status checks cannot freeze other commands.
-    let ip=tokio::task::spawn_blocking(direct_peer_ip)
-        .await.map_err(|_|"NetBird peer lookup failed".to_owned())??;
+    let ip=selected_direct_peer_ip().await?;
     let url=format!("http://{ip}:8765/api/{kind}");
     let mut client_builder=reqwest::Client::builder().no_proxy();
     let is_install=command.as_ref().and_then(|body|body.get("type")).and_then(Value::as_str)==Some("marketplace-install");
@@ -786,8 +856,8 @@ async fn direct_start_stream(app: tauri::AppHandle) -> Result<(), String> {
             // Token and peer selection can change in Connections. Rediscover
             // on reconnect without ever sending credentials to the frontend.
             let token = secret(DIRECT_SECRET);
-            let peer = tokio::task::spawn_blocking(direct_peer_ip).await;
-            if let (Ok(token), Ok(Ok(ip))) = (token, peer) {
+            let peer = selected_direct_peer_ip().await;
+            if let (Ok(token), Ok(ip)) = (token, peer) {
                 if token.len() >= 8 {
                     let endpoint = format!("http://{ip}:8765/api/events");
                     if let Ok(response) = client.get(&endpoint).bearer_auth(token).send().await {
