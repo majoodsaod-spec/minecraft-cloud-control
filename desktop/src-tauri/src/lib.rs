@@ -1148,6 +1148,7 @@ pub fn run() {
             github_file,github_save_file,github_download_backup,
             server_files_pending,server_files_stage,server_files_unstage,
             server_files_list,server_files_read,server_settings_get,server_settings_save,
+            modrinth_queue_list,modrinth_queue_add,modrinth_queue_remove,
             desktop_check_update,desktop_install_update,
             configure_cloudflare,cloudflare_status,cloudflare_command,cloudflare_console,
             server_restore_backup,
