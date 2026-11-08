@@ -1,3 +1,4 @@
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::{Mutex, OnceLock};
@@ -134,7 +135,6 @@ async fn github_job_log(job_id: u64) -> Result<String, String> {
     if !response.status().is_success() {
         return Err(format!("GitHub couldn't retrieve job logs (HTTP {})",response.status().as_u16()));
     }
-    use futures_util::StreamExt;
     let mut stream=response.bytes_stream();
     let mut tail=Vec::new();
     while let Some(part)=stream.next().await {
@@ -263,7 +263,6 @@ async fn desktop_install_update(app: tauri::AppHandle, expected_build: u64) -> R
     let mut output=tokio::fs::File::create(&zip_file).await
         .map_err(|_|"Couldn't write the downloaded update")?;
     use tokio::io::AsyncWriteExt;
-    use futures_util::StreamExt;
     let expected_size=response.content_length().filter(|size| *size>0);
     let mut stream=response.bytes_stream();
     let mut total=0_u64;
@@ -331,7 +330,6 @@ async fn github_download_backup(artifact_id: u64) -> Result<String, String> {
     let path=folder.join(format!("minecraft-world-{artifact_id}.zip"));
     let mut file=tokio::fs::File::create(&path).await.map_err(|_|"Can't create backup file".to_owned())?;
     use tokio::io::AsyncWriteExt;
-    use futures_util::StreamExt;
     let mut stream=response.bytes_stream();
     while let Some(chunk)=stream.next().await {
         file.write_all(&chunk.map_err(|_|"Backup download interrupted")?)
