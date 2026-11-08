@@ -144,16 +144,16 @@
     const container = document.getElementById("content");
     if (!container) return;
     container.innerHTML = '<section id="mc-marketplace" class="mc-discover">' +
-      '<div class="mc-discover-head"><div><div class="mc-discover-eyebrow"><span>◉</span> MODRINTH CATALOG</div>' +
-      '<h1>Discover server content</h1><p>Browse, explore and install straight to your Minecraft server.</p></div>' +
-      '<div class="mc-discover-server">' + (state.online ? '<span class="online">● Live server connected</span>' :
-        '<span class="offline">○ Connect NetBird to install</span>') + '<small>Paper 26.3</small></div></div>' +
+      '<div class="mc-discover-head"><div><div class="mc-discover-eyebrow"><span>◉</span> CONTENT LIBRARY</div>' +
+      '<h1>Plugins & Datapacks</h1><p>Browse Modrinth and install compatible content directly to Paper.</p></div>' +
+      '<div class="mc-discover-server">' + (state.online ? '<span class="online">● Server connected</span>' :
+        '<span class="offline">○ NetBird disconnected</span>') + '<small>Paper 26.3</small></div></div>' +
       '<div class="mc-discover-kind-bar">' +
       '<button type="button" class="' + (state.kind === "plugin" ? "active" : "") +
       '" data-market-action="kind" data-value="plugin">⬡ Plugins</button>' +
       '<button type="button" class="' + (state.kind === "datapack" ? "active" : "") +
       '" data-market-action="kind" data-value="datapack">▤ Data Packs</button>' +
-      '<span>Powered by Modrinth</span></div>' +
+      '<span>Modrinth</span></div>' +
       '<div class="mc-discover-layout">' + filters() + '<div class="mc-discover-primary">' +
       '<form id="mc-market-search-form" class="mc-discover-search"><span>⌕</span>' +
       '<input id="mc-market-query" type="search" autocomplete="off" placeholder="Search ' +
