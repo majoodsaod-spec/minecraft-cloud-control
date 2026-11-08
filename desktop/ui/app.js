@@ -8,9 +8,10 @@ const bytes=n=>!Number.isFinite(+n)?"—":(+n/1048576).toFixed(1)+" MB";
 const duration=s=>{s=Math.max(0,Math.floor(Number(s)||0));return [Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(x=>String(x).padStart(2,"0")).join(":");};
 const activeRun=r=>["in_progress","queued","waiting","requested","pending"].includes(r?.status);
 const isServer=r=>(r?.name||"").includes("Continuous Paper Minecraft Server")||(r?.path||"").includes("paper-state-test.yml");
-const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,directStreamConnected:false,cloudFetchedAt:0,netbirdAuto:null,directPeerConfig:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null)};
+const serverRunning=()=>connectedLive()||activeRun(latestServerRun());
+const state={restoreInProgress:false,restoreMessage:"",page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,directStreamConnected:false,cloudFetchedAt:0,netbirdAuto:null,directPeerConfig:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null)};
 function flash(text){const box=$("#toast");box.textContent=text;box.classList.add("show");clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>box.classList.remove("show"),4300)}
-function btn(label,action="refresh",cls=""){return `<button class="btn ${cls}" data-action="${action}">${label}</button>`}
+function btn(label,action="refresh",cls="",disabled=false){return `<button class="btn ${cls}" data-action="${action}" ${disabled?"disabled":""}>${label}</button>`}
 function boxEmpty(title,body,icon="◇"){return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${body}</p></div>`}
 function header(kicker,title,desc,actions=""){return `<div class="page-header"><div><div class="eyebrow">${kicker}</div><h1>${title}</h1><p>${desc}</p></div><div class="header-actions">${actions}</div></div>`}
 function panel(title,body,right=""){return `<section class="panel"><div class="panel-head"><h2 class="panel-title">${title}</h2>${right}</div>${body}</section>`}
@@ -247,7 +248,7 @@ function drawOverview(){
   const status=online?"Paper online":activeRun(main)?"Runner active · Paper unverified":main?.conclusion==="failure"?"Latest server run failed":main?.conclusion==="success"?"Last session finished":github?"No active Minecraft runner":"GitHub not connected";
   const statePill=online?pill("● LIVE SERVER",""):activeRun(main)?pill("◉ GITHUB RUN ACTIVE","warn"):main?.conclusion==="failure"?pill("● WORKFLOW FAILED","warn"):pill("○ NO LIVE PAPER DATA");
   const desc=online?(directOnline()?"Paper connected directly over NetBird, independently of Cloudflare.":"Paper is responding through Cloudflare."):activeRun(main)?"GitHub confirms a workflow is active, but it does not verify that Paper is ready. Use GitHub logs to check startup.":main?.conclusion==="failure"?"GitHub reports the last Minecraft workflow failed. Open its job logs below to identify the problem.":github?"GitHub is connected; there is no confirmed live Paper heartbeat. Start a new run only if no Minecraft workflow is active.":"Connect GitHub to manage workflows. GitHub access does not provide a live Paper connection.";
-  const hero=`<div class="hero"><div class="hero-top"><div><div class="hero-label">SERVER STATUS</div><div class="hero-title">${esc(status)}</div></div>${statePill}</div><div class="hero-desc">${desc}</div><div class="hero-actions">${btn("▶ Start server","start-server","primary")} ${btn("↻ Safe restart","restart-server")} ${btn("■ Save & stop","stop-server","danger")} ${main?btn("◷ View Minecraft logs","server-logs","flat"):""}</div></div>`;
+  const hero=`<div class="hero"><div class="hero-top"><div><div class="hero-label">SERVER STATUS</div><div class="hero-title">${esc(status)}</div></div>${statePill}</div><div class="hero-desc">${desc}</div><div class="hero-actions">${btn("▶ Start server","start-server","primary",serverRunning())} ${btn("↻ Safe restart","restart-server","",!connectedLive())} ${btn("■ Save & stop","stop-server","danger",!serverRunning()||!connectedLive())} ${main?btn("◷ View Minecraft logs","server-logs","flat"):""}</div></div>`;
   const stats=`<div class="stats">
    ${stat("Online players",online?(live.players||[]).length:"—",online?"Connected to Paper":"Live connection required","♙")}
    ${stat("Server uptime",liveClock.session?duration(interpolatedPaperSeconds("uptime")):"—","Current runner session","◷","uptime")}
@@ -299,24 +300,17 @@ function drawMarketplace(){
   window.McMarketplace.ensureLoaded();
 }
 function drawFiles(){
-  const f=state.file,isLoaded=f&&f.path===state.filePath,editable=!!f?.content;
-  let text="";
-  if(isLoaded&&f.type==="file"&&typeof f.content==="string"){
-    try{text=decodeURIComponent(escape(atob(f.content.replace(/\s/g,""))))}catch{
-      try{text=atob(f.content.replace(/\s/g,""))}catch{text=""}
-    }
-  }
-  $("#content").innerHTML=header("FILES","Repository Files","View and edit server configuration in GitHub.",btn("↻ Reload file","load-file","flat"))
-   +notice("Repository edits are committed to GitHub and don't immediately alter the running Paper process. For world data or live configuration, use the server's safe controls.")
-   +panel("File editor",`<div class="field"><label for="filepath">Repository path</label><div class="form-row"><div class="field"><input id="filepath" value="${esc(state.filePath)}" spellcheck="false" placeholder="server/server.properties"></div><button class="btn primary" data-action="load-file">Open file</button></div><div class="field-tip">Examples: server/server.properties, server/java.json, server/bedrock.json, README.md</div></div>
-    <div class="field"><label for="filecontent">File contents ${isLoaded?"· "+esc(f.sha?.slice(0,8)):""}</label><textarea id="filecontent" spellcheck="false" placeholder="Select a repository file above…" ${isLoaded&&editable?"":"disabled"}>${esc(text)}</textarea></div>
-    <div class="header-actions" style="justify-content:flex-start"><button class="btn primary" data-action="save-file" ${isLoaded&&editable?"":"disabled"}>Commit changes</button><span class="field-tip" id="fileState">${isLoaded?"Ready to edit":"File not loaded"}</span></div>`);
+  window.ServerManager.renderFiles(directOnline(),serverRunning());
+}
+function drawSettings(){
+  window.ServerManager.renderSettings();
 }
 function drawBackups(){
   const artifacts=(state.overview?.artifacts||[]).filter(a=>!a.expired&&a.name==="minecraft-world").sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   $("#content").innerHTML=header("BACKUPS","World Backups","Download saved world snapshots.",btn("↻ Refresh","refresh","flat"))
    +notice("<strong>Important:</strong> Always wait for the server to finish saving and uploading a verified backup before shutting it down. Download critical backups to your own PC.")
-   +panel("Available snapshots",artifacts.length?`<div class="run-list">${artifacts.map(a=>`<div class="run"><div class="run-icon">▤</div><div class="run-content"><strong>${esc(when(a.created_at))}</strong><span>Run #${esc(a.workflow_run?.id||"—")} · ${esc(bytes(a.size_in_bytes))}</span></div><div class="row-buttons"><button class="btn small flat" data-action="download" data-id="${Number(a.id)}">↓ Download ZIP</button></div></div>`).join("")}</div>`:boxEmpty("No snapshots found","Snapshots appear after a successful safe save and backup.","◷"));
+   +(state.restoreMessage?notice(esc(state.restoreMessage),!state.restoreInProgress):"")
+   +panel("Available snapshots",artifacts.length?`<div class="run-list">${artifacts.map(a=>`<div class="run"><div class="run-icon">▤</div><div class="run-content"><strong>${esc(when(a.created_at))}</strong><span>Run #${esc(a.workflow_run?.id||"—")} · ${esc(bytes(a.size_in_bytes))}</span></div><div class="row-buttons"><button class="btn small primary" data-action="restore-backup" data-id="${Number(a.workflow_run?.id||0)}" ${state.restoreInProgress||!a.workflow_run?.id?"disabled":""}>Restore</button><button class="btn small flat" data-action="download" data-id="${Number(a.id)}">↓ Download ZIP</button></div></div>`).join("")}</div>`:boxEmpty("No snapshots found","Snapshots appear after a successful safe save and backup.","◷"));
 }
 function drawConnections(){
   const gh=state.github.connected;
@@ -355,13 +349,13 @@ function editing(){
   return el&&["INPUT","TEXTAREA","SELECT"].includes(el.tagName);
 }
 function render(){
-  const titles={overview:"Overview",console:"Live Console",workflows:"GitHub Actions",files:"Repository Files",marketplace:"Plugins & Datapacks",backups:"World Backups",connections:"Connections"};
+  const titles={overview:"Overview",console:"Live Console",workflows:"GitHub Actions",files:"Server Files",settings:"Server Settings",marketplace:"Plugins & Datapacks",backups:"World Backups",connections:"Connections"};
   $("#breadcrumb").textContent=titles[state.page]||"Overview";
   document.querySelectorAll(".nav").forEach(el=>el.classList.toggle("active",el.dataset.page===state.page));
   $("#githubDot").classList.toggle("ok",state.github.connected);$("#githubShort").textContent=state.github.connected?"GitHub connected":"GitHub not connected";
   $("#cloudDot").classList.toggle("ok",connectedLive());$("#cloudDot").classList.toggle("warn",!connectedLive()&&!!state.cloud);
   $("#cloudShort").textContent=connectedLive()?"Live bridge online":"Live bridge unavailable";
-  const pages={overview:drawOverview,console:drawConsole,workflows:drawWorkflows,files:drawFiles,marketplace:drawMarketplace,backups:drawBackups,connections:drawConnections};
+  const pages={overview:drawOverview,console:drawConsole,workflows:drawWorkflows,files:drawFiles,settings:drawSettings,marketplace:drawMarketplace,backups:drawBackups,connections:drawConnections};
   (pages[state.page]||drawOverview)();
   restoreDrafts();
   syncUpdateButton();
@@ -454,6 +448,10 @@ async function startApp(){
     });
     await invoke("direct_start_stream");
   }catch(error){state.directError=errorText(error);}
+  try{await window.__TAURI__.event.listen("server-restore-progress",event=>{
+    state.restoreMessage=String(event.payload?.message||"Restoring backup…");
+    if(state.page==="backups")render();
+  });}catch{}
   await Promise.all([loadNetbirdAuto(),loadDirectPeerConfig()]);
   render();await refresh(true);
   if(state.github.connected)checkDesktopUpdate(true);
@@ -526,12 +524,14 @@ async function action(type,id){
     try{await run("configure_cloudflare",{url,password});clearDrafts("cloudPass");await loadCloud(false);flash(connectedLive()?"Live bridge connected.":"Connection saved; live server still unavailable.");render();}catch{}return;
   }
   case "start-server":{
+    if(serverRunning())return flash("Server is already running or starting.");
     if(!state.github.connected)return flash("Connect GitHub first.");
-    if(!await dialog("Start Minecraft server?","Dispatches a new Minecraft GitHub Actions session. If one is already running, GitHub may start another queued run."))return;
+    if(!await dialog("Start Minecraft server?","Start Paper from the latest verified world backup, including queued settings, files and Modrinth installs?"))return;
     try{await run("github_dispatch",{workflowId:"paper-state-test.yml"});flash("Minecraft workflow requested.");setTimeout(()=>refresh(true),1500);}catch{}return;
   }
   case "restart-server":case "stop-server":{
-    if(!connectedLive())return flash("Safe restart requires a working live bridge. Do not cancel the workflow or risk losing world progress.");
+    if(!serverRunning())return flash("The Minecraft server is already stopped.");
+    if(!connectedLive())return flash("Safe control requires a working live bridge. Do not force-cancel the workflow or risk world data.");
     const kind=type==="restart-server"?"restart":"shutdown";
     if(!await dialog(kind==="restart"?"Safely restart Minecraft?":"Safely save and stop?","This asks the live server agent to disconnect players, save all world data and upload a verified backup before the session ends."))return;
     try{await sendPaper(kind);flash("Safe operation requested. Check workflow for backup completion.");}catch{}return;
@@ -566,19 +566,27 @@ async function action(type,id){
       await dialog(id+" · recent runs",items||"No recent runs.");
     }catch{}return;
   }
-  case "load-file":{
-    const path=$("#filepath")?.value.trim()||state.filePath;state.filePath=path;
-    try{state.file=await run("github_file",{path});clearDrafts("filecontent");state.file.path=path;render();}catch{}return;
-  }
-  case "save-file":{
-    if(!state.file?.sha)return flash("Load a file first.");
-    const value=$("#filecontent").value;
-    if(!await dialog("Commit file changes?","This writes the edited file directly to the GitHub main branch. A running server won't load the changes until its next session."))return;
-    const raw=new TextEncoder().encode(value);let binary="";for(const b of raw)binary+=String.fromCharCode(b);
+  case "restore-backup":{
+    const backups=(state.overview?.artifacts||[]).filter(a=>a.name==="minecraft-world"&&!a.expired);
+    const backup=backups.find(a=>String(a.workflow_run?.id)===String(id));
+    if(!backup)return flash("Selected backup is unavailable or expired.");
+    const live=serverRunning();
+    const explanation="Restore snapshot from "+when(backup.created_at)+" (run #"+id+")? "+
+      (live?"The current server will save, stop safely, upload its latest world backup, then start from the selected older snapshot.":"The server will start from the selected snapshot.")+
+      " Newer world progress will not appear in the restored world. You can still download existing backups.";
+    if(!await dialog("Restore world backup?",explanation))return;
+    state.restoreInProgress=true;state.restoreMessage="Preparing verified restore…";
+    render();
     try{
-      await run("github_save_file",{args:{path:state.filePath,sha:state.file.sha,content_base64:btoa(binary),message:"Desktop: update "+state.filePath}});
-      flash("File committed to GitHub.");clearDrafts("filecontent");state.file=await run("github_file",{path:state.filePath});state.file.path=state.filePath;render();
-    }catch{}return;
+      await run("server_restore_backup",{runId:Number(id)});
+      state.restoreMessage="Restore dispatched. Paper will start from the selected backup.";
+      flash(state.restoreMessage);
+      await refresh(true);
+    }catch(error){
+      state.restoreMessage="Restore failed: "+errorText(error);
+      flash(state.restoreMessage);
+    }finally{state.restoreInProgress=false;if(state.page==="backups")render();}
+    return;
   }
   case "download":{
     try{const file=await run("github_download_backup",{artifactId:Number(id)});flash("World backup saved to "+file);}catch{}return;
