@@ -31,6 +31,7 @@
     kind: "plugin", query: "", category: "", version: "26.3", loader: "",
     sort: "downloads", page: 0, total: 0, hits: [], loading: false,
     loaded: false, installing: "", notice: "", error: false, installed: [],
+    sortTouched: false,
     online: false, epoch: 0, searchTimer: null
   };
   const root = () => document.getElementById("mc-marketplace");
@@ -219,6 +220,8 @@
   }
   function ensureLoaded() { if (!state.loaded && !state.loading) search(); }
   function setFilter(key, value) {
+    clearTimeout(state.searchTimer);
+    if (key === "sort") state.sortTouched = true;
     if (key === "kind") {
       state.kind = value;
       state.loader = "";
@@ -271,7 +274,7 @@
     if (["kind", "category", "version", "loader"].includes(action)) setFilter(action, value);
     if (action === "reset") {
       state.query = ""; state.category = ""; state.version = "26.3";
-      state.loader = ""; state.sort = "downloads"; state.page = 0;
+      state.loader = ""; state.sort = "downloads"; state.sortTouched = false; state.page = 0;
       state.epoch++; state.loaded = false;
       render(state.online); search();
     }
@@ -289,6 +292,11 @@
     if (event.target.id !== "mc-market-query" || !active()) return;
     state.query = event.target.value.slice(0, 100);
     state.page = 0;
+    if (!state.sortTouched) {
+      state.sort = state.query ? "relevance" : "downloads";
+      const select = document.getElementById("mc-market-sort");
+      if (select) select.value = state.sort;
+    }
     clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(search, 400);
   });
@@ -302,6 +310,11 @@
     clearTimeout(state.searchTimer);
     state.query = document.getElementById("mc-market-query").value.slice(0, 100);
     state.page = 0;
+    if (!state.sortTouched) {
+      state.sort = state.query ? "relevance" : "downloads";
+      const select = document.getElementById("mc-market-sort");
+      if (select) select.value = state.sort;
+    }
     search();
   });
   window.McMarketplace = { render, ensureLoaded };
