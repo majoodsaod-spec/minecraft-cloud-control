@@ -500,7 +500,7 @@ mod netbird_lifecycle_tests {
         assert_eq!(parse_peer_json(r#"{"peers":{"details":[
           {"fqdn":"minecraft-paper-42389453154.netbird.cloud",
            "netbirdIp":"100.94.2.7","status":"Disconnected"}
-        ]}}"#),Some("100.94.2.7".into()));
+        ]}}"#),None);
         assert_eq!(parse_peer_json("{}"),None);
         assert_eq!(parse_peer_json(r#"{"peers":{"details":[{"fqdn":"minecraft-paper-2",
             "netbirdIp":"8.8.8.8","status":"Connected"}]}}"#),None);
@@ -627,7 +627,7 @@ fn parse_peer_json(report: &str) -> Option<String> {
         let Some(ip)=peer.get("netbirdIp").and_then(Value::as_str) else {continue;};
         let Some(status)=peer.get("status").and_then(Value::as_str) else {continue;};
         if private_overlay_ip(ip) && matches!(
-            status.to_ascii_lowercase().as_str(),"connected"|"connecting"|"idle"|"disconnected"
+            status.to_ascii_lowercase().as_str(),"connected"|"connecting"|"idle"
         ) {
             candidates.push((id,ip.to_owned()));
         }
@@ -645,7 +645,7 @@ fn parse_peer_table(report: &str) -> Option<String> {
         // WireGuard session. Rejecting Idle here prevents that first packet.
         if !private_overlay_ip(cols[1]) {continue;}
         let status=cols[2].to_ascii_lowercase();
-        if !matches!(status.as_str(),"connected"|"connecting"|"idle"|"disconnected") {continue;}
+        if !matches!(status.as_str(),"connected"|"connecting"|"idle") {continue;}
         peers.push((id,cols[1].to_owned()));
     }
     peers.sort_unstable_by_key(|x|x.0);
@@ -678,7 +678,7 @@ fn parse_peer_details(report: &str) -> Option<String> {
         if let Some(value)=trimmed.strip_prefix("Status:"){
             // Idle peers can be awakened by the first authenticated HTTP request.
             connected=matches!(value.trim().to_ascii_lowercase().as_str(),
-                "connected"|"connecting"|"idle"|"disconnected");
+                "connected"|"connecting"|"idle");
         }
     }
     finish(id,ip,connected);
