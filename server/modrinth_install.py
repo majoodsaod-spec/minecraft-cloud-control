@@ -53,10 +53,14 @@ def install_modrinth(data:Path, project_id:str, version_id:str, kind:str):
            f.get("file_type") not in ("sources-jar","dev-jar","javadoc-jar")]
     if not files:raise ValueError("No compatible release file")
     chosen=next((f for f in files if f.get("primary")),files[0])
-    expected=(chosen.get("hashes") or {}).get("sha256","").lower()
+    hashes=chosen.get("hashes") or {}
+    # Modrinth v2 typically provides SHA-512, not SHA-256.
+    algorithm="sha512" if hashes.get("sha512") else "sha256"
+    expected=str(hashes.get(algorithm,"")).lower()
     url=chosen.get("url","")
-    if not re.fullmatch(r"[a-f0-9]{64}",expected) or not url.startswith("https://cdn.modrinth.com/"):
-        raise ValueError("Release has no trusted Modrinth CDN URL and SHA-256")
+    length=128 if algorithm=="sha512" else 64
+    if not re.fullmatch(r"[a-f0-9]{"+str(length)+r"}",expected) or not url.startswith("https://cdn.modrinth.com/"):
+        raise ValueError("Release has no trusted Modrinth CDN URL and strong file hash")
     advertised=chosen.get("size",0)
     if not isinstance(advertised,int) or not 1024<=advertised<=MAX_SIZE:
         raise ValueError("Release file exceeds safe size limit")
@@ -66,7 +70,7 @@ def install_modrinth(data:Path, project_id:str, version_id:str, kind:str):
     name="modrinth-"+project["id"]+suffix
     target=target_dir/name
     temporary=target_dir/(name+".download")
-    digest=hashlib.sha256()
+    digest=hashlib.new(algorithm)
     total=0
     try:
         req=urllib.request.Request(url,headers={"User-Agent":UA})
