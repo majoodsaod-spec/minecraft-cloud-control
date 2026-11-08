@@ -8,7 +8,7 @@ const bytes=n=>!Number.isFinite(+n)?"—":(+n/1048576).toFixed(1)+" MB";
 const duration=s=>{s=Math.max(0,Math.floor(Number(s)||0));return [Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(x=>String(x).padStart(2,"0")).join(":");};
 const activeRun=r=>["in_progress","queued","waiting","requested","pending"].includes(r?.status);
 const isServer=r=>(r?.name||"").includes("Continuous Paper Minecraft Server")||(r?.path||"").includes("paper-state-test.yml");
-const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,directStreamConnected:false,cloudFetchedAt:0,netbirdAuto:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null)};
+const state={page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,directStreamConnected:false,cloudFetchedAt:0,netbirdAuto:null,directPeerConfig:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null)};
 function flash(text){const box=$("#toast");box.textContent=text;box.classList.add("show");clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>box.classList.remove("show"),4300)}
 function btn(label,action="refresh",cls=""){return `<button class="btn ${cls}" data-action="${action}">${label}</button>`}
 function boxEmpty(title,body,icon="◇"){return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${body}</p></div>`}
@@ -184,6 +184,10 @@ function connectedLive(){
 async function loadNetbirdAuto(){
   try{state.netbirdAuto=await invoke("netbird_auto_status");}catch{}
 }
+async function loadDirectPeerConfig(){
+  try{state.directPeerConfig=await invoke("direct_peer_config");}
+  catch{state.directPeerConfig=null;}
+}
 let pendingDirectStatus=null;
 async function loadDirect(quiet=true){
   // Fast UI refresh and the slower GitHub refresh used to launch overlapping
@@ -308,7 +312,7 @@ function drawConnections(){
      <button class="btn primary" data-action="connect-cloud">Save and test live connection</button>
      ${state.cloudError?`<p class="field-tip" style="color:#c46b53">Last error: ${esc(state.cloudError)}</p>`:""}
    `)}</div>`+
-   `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Direct Paper · NetBird</h2>${directOnline()?pill("● Private connection online",""):pill("○ Not connected","warn")}</div><p class="field-tip">Connect directly to your temporary GitHub Actions Paper runner. NetBird must be connected on your Windows PC. The app automatically discovers connected minecraft-paper-* peers after each restart. Live console and server metrics work without Cloudflare.</p><div class="notice good" style="margin-top:17px"><label for="netbirdAuto" style="display:flex;align-items:center;gap:12px;cursor:pointer"><input id="netbirdAuto" type="checkbox" ${state.netbirdAuto?.enabled?"checked":""} style="width:17px;height:17px;accent-color:#158b69"><span><strong>Automatically connect NetBird</strong><span style="display:block;font-size:11px;margin-top:5px">Connect on app launch and disconnect when it closes, only if Minecraft Cloud started the VPN itself.</span></span></label><div style="margin-top:9px;font-size:11px">NetBird: ${state.netbirdAuto?.connected?"Connected":"Not connected"} ${state.netbirdAuto?.ownedByApp?"· Managed by Minecraft Cloud":""}</div></div><div class="field" style="margin-top:16px"><label for="directToken">Direct-control secret</label><input id="directToken" type="password" autocomplete="off" placeholder="Value saved as MINECRAFT_DIRECT_TOKEN in GitHub Secrets"></div><div class="field"><label for="directPeer">Manual NetBird peer IP (optional)</label><input id="directPeer" placeholder="Leave blank for automatic discovery"></div><div class="header-actions" style="justify-content:flex-start"><button class="btn primary" data-action="connect-direct">Connect Direct Paper</button><button class="btn flat" data-action="test-direct">Test connection</button></div>${state.directError?`<p class="field-tip" style="color:#b96154;margin-top:12px">${esc(state.directError)}</p>`:""}</section>`+
+   `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Direct Paper · NetBird</h2>${directOnline()?pill("● Private connection online",""):pill("○ Not connected","warn")}</div><p class="field-tip">Connect directly to your temporary GitHub Actions Paper runner. NetBird must be connected on your Windows PC. The app automatically discovers connected minecraft-paper-* peers after each restart. Live console and server metrics work without Cloudflare.</p><div class="notice good" style="margin-top:17px"><label for="netbirdAuto" style="display:flex;align-items:center;gap:12px;cursor:pointer"><input id="netbirdAuto" type="checkbox" ${state.netbirdAuto?.enabled?"checked":""} style="width:17px;height:17px;accent-color:#158b69"><span><strong>Automatically connect NetBird</strong><span style="display:block;font-size:11px;margin-top:5px">Connect on app launch and disconnect when it closes, only if Minecraft Cloud started the VPN itself.</span></span></label><div style="margin-top:9px;font-size:11px">NetBird: ${state.netbirdAuto?.connected?"Connected":"Not connected"} ${state.netbirdAuto?.ownedByApp?"· Managed by Minecraft Cloud":""}</div></div><div class="field" style="margin-top:16px"><label for="directToken">Direct-control secret</label><input id="directToken" type="password" autocomplete="off" placeholder="Value saved as MINECRAFT_DIRECT_TOKEN in GitHub Secrets"></div><div class="field"><label for="directPeer">Manual NetBird peer IP (optional)</label><input id="directPeer" placeholder="Leave blank for automatic discovery"></div>${state.directPeerConfig?.manual?`<div class="notice" style="margin-bottom:12px"><strong>Manual peer override is active:</strong> ${esc(state.directPeerConfig.peerIp)}. This may point to an old GitHub runner.<div style="margin-top:10px"><button class="btn primary" data-action="clear-direct-peer">Use active server automatically</button></div></div>`:`<p class="field-tip" style="margin:0 0 12px">Automatic discovery: uses the active Minecraft GitHub workflow when GitHub is connected.</p>`}<div class="header-actions" style="justify-content:flex-start"><button class="btn primary" data-action="connect-direct">Connect Direct Paper</button><button class="btn flat" data-action="test-direct">Test connection</button></div>${state.directError?`<p class="field-tip" style="color:#b96154;margin-top:12px">${esc(state.directError)}</p>`:""}</section>`+
    `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Windows app updates</h2>${state.update?.available?pill("● New build available",""):pill("Installed app","muted")}</div><p class="field-tip">Check GitHub for the latest successful Windows installer. Quick Update upgrades your existing installation without manually downloading or extracting ZIP files. Your login remains saved on this PC.</p><div class="header-actions" style="justify-content:flex-start;margin-top:16px"><button class="btn primary" data-action="check-update">${state.update?.available?"Install update #"+state.update.runNumber:"↻ Quick Update"}</button><span class="field-tip" id="updateStatusConnections">${esc(state.updateMessage|| (state.update?"Installed build "+(state.update.currentBuild||"legacy")+" · Latest build "+state.update.runNumber:"No update check performed yet"))}</span></div></section>`;
 }
 // Edits survive background telemetry updates, navigation, and incidental
@@ -426,7 +430,7 @@ async function startApp(){
     });
     await invoke("direct_start_stream");
   }catch(error){state.directError=errorText(error);}
-  await loadNetbirdAuto();
+  await Promise.all([loadNetbirdAuto(),loadDirectPeerConfig()]);
   render();await refresh(true);
   if(state.github.connected)checkDesktopUpdate(true);
   if(!state.github.connected){state.page="connections";render();}
@@ -470,11 +474,24 @@ async function action(type,id){
     if(token.length<8)return flash("Enter a token of at least 8 characters matching MINECRAFT_DIRECT_TOKEN in GitHub Actions.");
     try{
       await run("direct_configure",{token,peerIp});
+      await loadDirectPeerConfig();
       clearDrafts("directToken","directPeer");
       await loadDirect(false);
       flash(directOnline()?"Direct Paper connected! No Cloudflare required.":"Credentials saved. Start a new runner with NetBird enabled, then test again.");
       render();
     }catch{}return;
+  }
+  case "clear-direct-peer":{
+    try{
+      state.directPeerConfig=await run("direct_clear_peer");
+      clearDrafts("directPeer");
+      state.directError=null;
+      flash("Manual NetBird address cleared. Looking for the active Paper runner.");
+      await loadDirect(false);
+    }catch(error){
+      state.directError=errorText(error);
+    }
+    render();return;
   }
   case "test-direct":{
     await loadDirect(false);flash(directOnline()?"NetBird connection healthy.":"Direct Paper unavailable: "+(state.directError||"Check NetBird status."));render();return;
