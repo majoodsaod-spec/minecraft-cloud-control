@@ -21,6 +21,7 @@ from runtime_bridge import LiveBridge
 from direct_control import DirectControl
 from managed_plugins import install_managed_plugins
 from geyser_setup import configure_geyser
+from pending_files import apply_pending
 
 IDLE_SECONDS = 3600
 MAX_SECONDS = 5 * 3600 + 30 * 60
@@ -327,6 +328,7 @@ def main() -> None:
     WORK.mkdir(exist_ok=True)
     DATA.mkdir(parents=True, exist_ok=True)
     restore_snapshot()
+    apply_pending(DATA, WORK.parent / "server" / "pending-files.json")
     config = json.loads(CONFIG.read_text())
     jar = download_paper(config["minecraft_version"])
     run(jar)
