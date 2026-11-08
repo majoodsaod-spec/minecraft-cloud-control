@@ -264,11 +264,14 @@ async fn desktop_install_update(app: tauri::AppHandle, expected_build: u64) -> R
         .map_err(|_|"Couldn't write the downloaded update")?;
     use tokio::io::AsyncWriteExt;
     use futures_util::StreamExt;
+    let expected_size=response.content_length().filter(|size| *size>0);
     let mut stream=response.bytes_stream();
     let mut total=0_u64;
     while let Some(next)=stream.next().await {
         let chunk=next.map_err(|_|"The update download was interrupted")?;
         total+=chunk.len() as u64;
+        let percent=expected_size.map(|size| (total.saturating_mul(100)/size).min(100));
+        let _=app.emit("desktop-update-progress",json!({"stage":"downloading","percent":percent}));
         if total>DOWNLOAD_LIMIT {
             let _=tokio::fs::remove_file(&zip_file).await;
             return Err("Update exceeds the download safety limit".into());
@@ -278,6 +281,7 @@ async fn desktop_install_update(app: tauri::AppHandle, expected_build: u64) -> R
     output.flush().await.map_err(|_|"Couldn't finish the update download")?;
     drop(output);
 
+    let _=app.emit("desktop-update-progress",json!({"stage":"extracting"}));
     // Extract only a filename-matched installer, never arbitrary ZIP paths.
     // The ZIP comes from the latest successful workflow in our own repository.
     let installer=dir.join("MinecraftCloud-Update-Setup.exe");
@@ -306,6 +310,7 @@ async fn desktop_install_update(app: tauri::AppHandle, expected_build: u64) -> R
 
     // This is an in-place NSIS upgrade for the same Tauri app identifier.
     // Launch first, then close our own process so Windows can replace files.
+    let _=app.emit("desktop-update-progress",json!({"stage":"launching"}));
     std::process::Command::new(installer)
         .spawn().map_err(|_|"Windows couldn't launch the update installer")?;
     app.exit(0);
