@@ -142,5 +142,31 @@ class ScheduledRecoveryTests(unittest.TestCase):
         self.assertTrue(recovery_gate.allowed(None, [], [], 101)[0])
 
 
+class WorkflowIntegrationTests(unittest.TestCase):
+    def test_automatic_recovery_is_gated_before_snapshot_download(self):
+        workflow = (ROOT / ".github/workflows/paper-state-test.yml").read_text()
+        self.assertIn("python server/recovery_gate.py --backup-run", workflow)
+        self.assertLess(workflow.index("python server/recovery_gate.py --backup-run"),
+                        workflow.index('gh run download "$run_id"'))
+        self.assertIn('if [[ "$EVENT_NAME" == "schedule" && -f previous/stop-requested ]]; then', workflow)
+
+    def test_no_successor_without_verified_artifact(self):
+        workflow = (ROOT / ".github/workflows/paper-state-test.yml").read_text()
+        self.assertIn("needs.minecraft.outputs.backed_up == 'true'", workflow)
+        self.assertIn("needs.minecraft.outputs.stop_requested != 'true'", workflow)
+        self.assertIn('python server/handoff.py --run-id "$GITHUB_RUN_ID"', workflow)
+
+    def test_timings_available_in_job_summary_without_credentials(self):
+        workflow = (ROOT / ".github/workflows/paper-state-test.yml").read_text()
+        paper = (ROOT / "server" / "continuous_paper.py").read_text()
+        bridge = (ROOT / "server" / "runtime_bridge.py").read_text()
+        self.assertIn("cycle-output/lifecycle-report.json", workflow)
+        self.assertIn("markdown_summary", workflow)
+        self.assertIn('recorder.stage("restore_backup")', paper)
+        self.assertIn('recorder.stage("paper_download")', paper)
+        self.assertIn('recorder.mark("saved")', paper)
+        self.assertIn('"startupTimings":dict(self.startup_timings)', bridge)
+
+
 if __name__ == "__main__":
     unittest.main()
