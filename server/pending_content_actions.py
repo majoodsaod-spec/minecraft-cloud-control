@@ -54,6 +54,12 @@ def apply_content_actions(data: Path, manifest: Path):
     plugins.mkdir(parents=True, exist_ok=True)
     disabled = plugins / DISABLED
     inventory = installed_inventory(Path(data))
+    receipt_path = Path(data) / ".cloud-applied-content.json"
+    receipts = {}
+    if receipt_path.is_file():
+        receipts = json.loads(receipt_path.read_text(encoding="utf-8"))
+        if not isinstance(receipts,dict) or len(receipts)>1000:
+            raise ValueError("Invalid content action receipts")
     results = []
     for project, action in actions.items():
         active = plugins / ("modrinth-" + project + ".jar")
@@ -87,6 +93,15 @@ def apply_content_actions(data: Path, manifest: Path):
             inventory.pop(project, None)
         # Keep plugin data/config folders untouched. Atomic registry update.
         write_registry(data, inventory)
+        receipts[project]=action
+        if len(receipts)>700:
+            receipts=dict(list(receipts.items())[-500:])
+        temporary=receipt_path.with_name(receipt_path.name+".tmp")
+        try:
+            temporary.write_text(json.dumps(receipts,sort_keys=True,indent=2)+"\n",encoding="utf-8")
+            os.replace(temporary,receipt_path)
+        finally:
+            temporary.unlink(missing_ok=True)
         results.append({"projectId": project, "action": action, "applied": True})
     print("Applied " + str(len(results)) + " queued managed plugin action(s)", flush=True)
     return results
