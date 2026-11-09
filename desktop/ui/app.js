@@ -509,6 +509,7 @@ async function loadWorlds(force=false){
     if(state.page==="backups"&&!editing())render();
   }
 }
+function drawAutomation(){window.ServerAutomations.render();}
 function drawBackups(){
   const artifacts=(state.overview?.artifacts||[]).filter(a=>!a.expired&&a.name==="minecraft-world").sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   const connected=directOnline(),session=state.direct?.session||null;
@@ -566,13 +567,13 @@ function editing(){
   return el&&["INPUT","TEXTAREA","SELECT"].includes(el.tagName);
 }
 function render(){
-  const titles={overview:"Overview",console:"Live Console",workflows:"GitHub Actions",files:"Server Files",players:"Players",settings:"Server Settings",marketplace:"Plugins & Datapacks",backups:"World Backups",connections:"Connections"};
+  const titles={overview:"Overview",console:"Live Console",workflows:"GitHub Actions",files:"Server Files",players:"Players",settings:"Server Settings",marketplace:"Plugins & Datapacks",backups:"World Backups",automation:"Automations",connections:"Connections"};
   $("#breadcrumb").textContent=titles[state.page]||"Overview";
   document.querySelectorAll(".nav").forEach(el=>el.classList.toggle("active",el.dataset.page===state.page));
   $("#githubDot").classList.toggle("ok",state.github.connected);$("#githubShort").textContent=state.github.connected?"GitHub connected":"GitHub not connected";
   $("#cloudDot").classList.toggle("ok",connectedLive());$("#cloudDot").classList.toggle("warn",!connectedLive()&&!!state.cloud);
   $("#cloudShort").textContent=connectedLive()?"Live bridge online":"Live bridge unavailable";
-  const pages={overview:drawOverview,console:drawConsole,workflows:drawWorkflows,files:drawFiles,players:drawPlayers,settings:drawSettings,marketplace:drawMarketplace,backups:drawBackups,connections:drawConnections};
+  const pages={overview:drawOverview,console:drawConsole,workflows:drawWorkflows,files:drawFiles,players:drawPlayers,settings:drawSettings,marketplace:drawMarketplace,backups:drawBackups,automation:drawAutomation,connections:drawConnections};
   (pages[state.page]||drawOverview)();
   restoreDrafts();
   syncUpdateButton();
