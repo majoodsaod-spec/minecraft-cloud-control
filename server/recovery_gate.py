@@ -5,7 +5,6 @@ recovery must not silently roll back players when a newer Paper run crashed,
 was cancelled, or timed out without producing its own verified backup.
 """
 import argparse
-from datetime import datetime, timezone
 import json
 import os
 import subprocess
@@ -75,9 +74,7 @@ def main():
         return 0
     print(f"::warning::Automatic Paper recovery blocked: {reason}. "
           "Inspect failed runs and restore a verified backup manually.")
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-        output.write("skip=true\n")
-    return 0
+    return 1
 
 
 if __name__ == "__main__":
