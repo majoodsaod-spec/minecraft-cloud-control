@@ -89,7 +89,11 @@ function render(){
     '<div class="player-whitelist"><span><strong>Whitelist enforcement</strong><small>'+
     (data?.whitelistEnabled===null||data?.whitelistEnabled===undefined?"Status unavailable":
       data.whitelistEnabled?"Enabled":"Disabled")+'</small></span>'+
-    '<button class="btn small" data-player-action="settings">Open Server Settings</button></div>'+
+    '<div class="player-whitelist-buttons">'+
+      (canManage&&data&&typeof data.whitelistEnabled==="boolean"?
+        '<button type="button" class="btn small" data-player-action="whitelist-toggle" '+
+        (state.acting?"disabled":"")+'>'+(data.whitelistEnabled?"Disable whitelist":"Enable whitelist")+'</button>':'')+
+      '<button class="btn small" data-player-action="settings">Open Server Settings</button></div></div>'+
     '<p class="field-tip">'+(state.live?"Live Paper records":"Backup records")+
     (state.fetchedAt?" · refreshed "+Math.max(0,Math.round(n/1000))+" seconds ago":" · not yet loaded")+
     '. Commands are acknowledged by the server agent; refresh to verify Paper applied them.</p></section></section>';
@@ -155,6 +159,22 @@ document.addEventListener("click",e=>{
       const player=root().querySelector("#player-name")?.value.trim();
       const command=root().querySelector("#player-command")?.value;
       perform(command,player);
+      break;
+    }
+    case "whitelist-toggle":{
+      const previous=state.data?.whitelistEnabled;
+      if(!state.live||typeof previous!=="boolean"||state.acting)break;
+      const desired=!previous;
+      if(!window.confirm((desired?"Enable":"Disable")+
+          " whitelist enforcement?\n\nThis changes who may join Paper. Confirm before applying."))break;
+      state.acting=true;state.error="";state.notice="Sending whitelist setting to Paper…";render();
+      try{
+        const response=await invoke("direct_command",{kind:desired?"whitelist-on":"whitelist-off",args:{}});
+        if(!response?.ok)throw Error(response?.error||"Paper did not acknowledge whitelist change");
+        state.notice="Whitelist change requested. Refresh player records to verify Paper saved it.";
+        state.fetchedAt=0;
+      }catch(error){state.error="Whitelist update failed: "+String(error).slice(0,180);}
+      finally{state.acting=false;if(root())render();}
       break;
     }
   }
