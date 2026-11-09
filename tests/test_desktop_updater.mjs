@@ -205,7 +205,7 @@ test("Server Files replaces the repository filename editor and uses verified bac
   assert.match(ui,/window\.ServerManager\.renderSettings\(\)/);
   assert.doesNotMatch(ui,/data-action="load-file"|data-action="save-file"/);
   assert.match(serverRust,/async fn verified_backup\(/);
-  assert.match(serverRust,/Sha256::digest\(&inner\)/);
+  assert.match(serverRust,/hasher\.finalize\(\)/);
   assert.match(serverRust,/server_files_list\(path:String,live:bool\)/);
   assert.match(serverRust,/server_files_stage\(path:String,content:String\)/);
   assert.match(managerCss,/\.server-manager-layout/);
@@ -237,4 +237,15 @@ test("Modrinth content queues offline and downloads only on the server",()=>{
   assert.match(serverRust,/async fn modrinth_queue_remove\(/);
   assert.match(serverRust,/async fn modrinth_queue_list\(/);
   assert.match(rust,/modrinth_queue_list,modrinth_queue_add,modrinth_queue_remove/);
+});
+
+test("Offline backup viewer streams unbounded snapshot archives to disk",()=>{
+  assert.doesNotMatch(serverRust,/BACKUP_LIMIT|240 MiB viewer limit/);
+  assert.match(serverRust,/std::env::temp_dir\(\)/);
+  assert.match(serverRust,/tokio::fs::File::create\(&artifact_path\)/);
+  assert.match(serverRust,/backup\.read\(&mut buffer\)/);
+  assert.match(serverRust,/hasher\.update\(&buffer\[\.\.read\]\)/);
+  assert.match(serverRust,/Backup SHA-256 mismatch/);
+  assert.match(serverRust,/fn cleanup_backup_cache\(\)/);
+  assert.match(rust,/cleanup_backup_cache\(\)/);
 });
