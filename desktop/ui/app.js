@@ -402,7 +402,7 @@ function drawConsole(){
   const term=$("#terminal");term.scrollTop=term.scrollHeight;
 }
 function drawMarketplace(){
-  window.McMarketplace.render(directOnline());
+  window.McMarketplace.render(directOnline(),currentPaper()?.session||null);
   window.McMarketplace.ensureLoaded();
 }
 function drawFiles(){
