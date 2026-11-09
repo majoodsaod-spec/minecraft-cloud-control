@@ -48,6 +48,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check desktop/ui/server_management.js
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check desktop/ui/server_lifecycle.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tests/test_server_lifecycle.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/test_desktop_updater.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test Modrinth server-side plugin and datapack installer
