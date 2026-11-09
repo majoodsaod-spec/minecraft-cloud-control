@@ -176,6 +176,12 @@ test("Uptime stays monotonic and does not reset when NetBird SSE reconnects",()=
   assert.match(ui,/recordMetric\(next\)/);
   assert.match(ui,/Keep the existing/);
 });
+test("Resource history rejects missing metrics instead of inventing CPU or disk pressure",()=>{
+  assert.match(ui,/snapshot\.cpuPercent==null\|\|snapshot\.memoryMiB==null/);
+  assert.match(ui,/snapshot\.diskFreeMiB==null\?NaN/);
+  assert.match(ui,/state\.metricHistory\.length>120/);
+  assert.match(ui,/state\.metricSession!==snapshot\.session/);
+});
 test("Automatic NetBird discovery verifies the control API rather than trusting a stale peer name",()=>{
   assert.match(rust,/async fn selected_direct_peer_ip\(\)/);
   assert.match(rust,/static VERIFIED_PEER:/);
