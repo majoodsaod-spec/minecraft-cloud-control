@@ -1126,7 +1126,7 @@ async fn direct_command(kind: String, args: Value) -> Result<Value, String> {
     const ALLOWED: &[&str]=&[
         "console","save","restart","shutdown","kick","ban","pardon",
         "whitelist-add","whitelist-remove","whitelist-on","whitelist-off",
-        "op","deop","plugins-list","files-list","files-tree","files-read",
+        "op","deop","players-list","plugins-list","files-list","files-tree","files-read",
         "files-write","files-delete","files-mkdir","files-rename",
         "files-upload","files-download","marketplace-install","marketplace-inventory",
     ];
