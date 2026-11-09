@@ -7,6 +7,7 @@ on:
     paths:
       - "desktop/**"
       - "tests/test_desktop_updater.mjs"
+      - "tests/test_phase2_queue.mjs"
       - ".github/workflows/build-windows.yml"
 
 permissions:
@@ -47,6 +48,10 @@ jobs:
           node --check desktop/ui/marketplace.js
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check desktop/ui/server_management.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check desktop/ui/change_queue.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tests/test_phase2_queue.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check desktop/ui/server_lifecycle.js
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
