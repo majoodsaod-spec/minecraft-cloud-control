@@ -468,6 +468,64 @@ async fn modrinth_queue_remove(project_id:String)->Result<Value,String>{
 }
 
 
+// Desired plugin state is stored separately from version updates. Only
+// Modrinth-managed plugin IDs may be enabled/disabled/removed; JARs and
+// plugin configuration data are never edited in the public repository.
+const PENDING_CONTENT_ACTIONS:&str="server/pending-content-actions.json";
+async fn pending_content_actions()->Result<(Value,String),String>{
+    let file=github(&format!("/contents/{PENDING_CONTENT_ACTIONS}?ref=main"),
+        reqwest::Method::GET,None).await?;
+    let value:Value=serde_json::from_str(&decode_content(&file)?)
+        .map_err(|_|"Invalid plugin actions manifest")?;
+    let map=value.as_object().ok_or("Invalid plugin actions format")?;
+    if map.len()>100{return Err("Too many managed plugin changes".into())}
+    if map.iter().any(|(id,action)|id.len()<3||id.len()>32||
+       !id.chars().all(|c|c.is_ascii_alphanumeric())||
+       !["enable","disable","remove"].contains(&action.as_str().unwrap_or(""))){
+        return Err("Invalid managed plugin action".into())
+    }
+    Ok((value,file["sha"].as_str().ok_or("Missing plugin queue revision")?.to_string()))
+}
+async fn update_content_actions(value:Value,sha:String)->Result<Value,String>{
+    let content=serde_json::to_string_pretty(&value).map_err(|_|"Cannot encode plugin queue")?;
+    github(&format!("/contents/{PENDING_CONTENT_ACTIONS}"),reqwest::Method::PUT,
+        Some(json!({"branch":"main","sha":sha,
+            "message":"Update staged Modrinth plugin desired state",
+            "content":encode_content(&(content+"\n"))}))).await?;
+    Ok(json!({"ok":true}))
+}
+#[tauri::command]
+async fn modrinth_content_actions_list()->Result<Value,String>{
+    Ok(pending_content_actions().await?.0)
+}
+#[tauri::command]
+async fn modrinth_content_action_set(project_id:String,action:String)->Result<Value,String>{
+    if project_id.len()<3||project_id.len()>32||
+       !project_id.chars().all(|c|c.is_ascii_alphanumeric())||
+       !["enable","disable","remove"].contains(&action.as_str()){
+        return Err("Invalid managed plugin or action".into())
+    }
+    let (mut value,sha)=pending_content_actions().await?;
+    let map=value.as_object_mut().ok_or("Invalid plugin queue")?;
+    if map.len()>=100&&!map.contains_key(&project_id){
+        return Err("Managed plugin change queue is full".into())
+    }
+    map.insert(project_id.clone(),json!(action));
+    update_content_actions(value,sha).await?;
+    Ok(json!({"queued":true,"projectId":project_id,"action":action}))
+}
+#[tauri::command]
+async fn modrinth_content_action_remove(project_id:String)->Result<Value,String>{
+    if project_id.len()<3||project_id.len()>32||
+       !project_id.chars().all(|c|c.is_ascii_alphanumeric()){
+        return Err("Invalid Modrinth project ID".into())
+    }
+    let (mut value,sha)=pending_content_actions().await?;
+    value.as_object_mut().ok_or("Invalid plugin queue")?.remove(&project_id);
+    update_content_actions(value,sha).await?;
+    Ok(json!({"removed":true,"projectId":project_id}))
+}
+
 // Phase 2: a versioned, limited manifest of one-shot file operations.
 // A receipt in the verified Paper snapshot prevents repeating a deletion or
 // rename every time GitHub Actions starts a new runner.
