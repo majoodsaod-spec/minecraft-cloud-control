@@ -485,6 +485,22 @@ async fn server_restore_backup(app:tauri::AppHandle,run_id:u64)->Result<Value,St
             }
             break;
         }
+        // A successful workflow is not enough: the current world must have
+        // produced a visible backup before a historical restore can replace it.
+        let mut current_saved=false;
+        for attempt in 0..10 {
+            let listing=github("/actions/artifacts?name=minecraft-world&per_page=100",
+                reqwest::Method::GET,None).await?;
+            current_saved=listing["artifacts"].as_array().map(|items|
+                items.iter().any(|a|a["name"]=="minecraft-world"&&a["expired"]==false&&
+                    active.contains(&a["workflow_run"]["id"].as_u64().unwrap_or(0))))
+                .unwrap_or(false);
+            if current_saved {break;}
+            if attempt<9 {tokio::time::sleep(std::time::Duration::from_secs(3)).await;}
+        }
+        if !current_saved {
+            return Err("Safe shutdown finished, but its new world backup is not yet verified in GitHub. Restore aborted to protect your latest world.".into());
+        }
     }
     let _=app.emit("server-restore-progress",json!({"stage":"restoring",
         "message":"Starting Paper from the selected verified world backup…"}));
