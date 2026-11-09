@@ -214,3 +214,21 @@ h1,h2,h3,.server-title,.page-header h1,.hero-title{color:#23343b;letter-spacing:
 #marketSearchForm input{flex:1;min-width:0}
 @media(max-width:650px){.mc-market-item{align-items:flex-start;flex-direction:column}
   .mc-market-item .btn{width:100%}}
+
+/* Persistent server lifecycle indicator (phase-based, no invented percentages). */
+.server-operation{margin:14px 25px 0;padding:14px 17px;background:#fff;border:1px solid #d9e8e1;border-radius:13px;box-shadow:0 4px 20px #193b3010}
+.server-operation[hidden]{display:none}
+.server-operation-top,.server-operation-bottom{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.server-operation-top strong{font-size:13px;color:#254b3a}
+.server-operation-top>span{font-size:11px;font-weight:700;color:#168b70}
+.server-operation-bottom{margin-top:9px;font-size:10.5px;color:#879a92;line-height:1.45}
+.server-operation-stages{display:flex;align-items:stretch;gap:6px;margin:12px 0}
+.server-operation-stage{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px;align-items:center;text-align:center;font-size:10px;color:#96a8a0}
+.server-operation-stage i{height:6px;width:100%;border-radius:99px;background:#e6eeea;display:block}
+.server-operation-stage.complete{color:#439977}
+.server-operation-stage.complete i{background:#49b88c}
+.server-operation-stage.current{color:#167a56;font-weight:750}
+.server-operation-stage.current i{background:linear-gradient(90deg,#c2e9d4,#178b6a,#c2e9d4);background-size:200% 100%;animation:server-progress-shimmer 1.8s linear infinite}
+@keyframes server-progress-shimmer{to{background-position:-200% 0}}
+@media(max-width:700px){.server-operation{margin:10px 12px 0;padding:12px}.server-operation-stage{font-size:9px}}
+@media(prefers-reduced-motion:reduce){.server-operation-stage.current i{animation:none}}
