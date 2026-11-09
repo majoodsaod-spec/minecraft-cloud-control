@@ -80,6 +80,7 @@ class DirectControl:
                     "uptime": uptime, "restartIn": max(0, 19800 - uptime),
                     "emptyFor": empty_for, "players": players, "logs": logs,
                     "memoryMiB": b._memory_mb(), "memoryLimitMiB": 8192,
+                    "cpuPercent": b._cpu_percent(), **b._disk_space(),
                     "connection": "netbird",
                     "startupTimings": dict(getattr(b, "startup_timings", {})),
                 }
