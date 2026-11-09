@@ -328,13 +328,30 @@ document.addEventListener("click",async event=>{
    if(root())renderFiles(state.lastLive,state.lastRunning);return;
  }
  if(action==="file"){await openFile(control.dataset.path);return}
+ if(action==="new-folder"){await stageFolder();return}
+ if(action==="new-file"){await stageNewFile();return}
+ if(action==="rename-file"){await stageRename();return}
+ if(action==="delete-file"){await stageDelete();return}
+ if(action==="upload-file"){document.querySelector("#server-file-upload-input")?.click();return}
  if(action==="reload"){state.listing=null;state.fileLoadKey=null;await loadFiles();return}
  if(action==="save-file"){await saveFile();return}
  if(action==="discard"){await discard();return}
  if(action==="reload-settings"){state.settingsLoaded=false;await loadSettings();return}
  if(action==="save-settings"){await saveSettings();return}
 });
+document.addEventListener("change",async event=>{
+ if(event.target.id==="server-file-upload-input"){
+   const files=Array.from(event.target.files||[]);
+   event.target.value="";
+   await uploadTextFiles(files);
+ }
+});
 document.addEventListener("input",event=>{
+ if(event.target.id==="server-file-search"){
+   state.search=event.target.value;
+   const area=document.querySelector("#server-files-list");
+   if(area)area.innerHTML=rows();
+ }
  if(event.target.id==="server-setting-search"){
    state.settingSearch=event.target.value;
    // Redraw only after debounce; settings inputs are kept intact if filtering.
@@ -342,5 +359,5 @@ document.addEventListener("input",event=>{
    state.searchTimer=setTimeout(()=>{if(document.querySelector(".settings-page"))renderSettings()},250);
  }
 });
-window.ServerManager={renderFiles,renderSettings,loadFiles,loadSettings};
+window.ServerManager={renderFiles,renderSettings,loadFiles,loadSettings,refreshPending};
 })();
