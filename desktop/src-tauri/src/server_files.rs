@@ -530,6 +530,12 @@ async fn modrinth_content_action_set(project_id:String,action:String)->Result<Va
        !["enable","disable","remove"].contains(&action.as_str()){
         return Err("Invalid managed plugin or action".into())
     }
+    if action=="disable"||action=="remove"{
+        let (install_queue,_)=modrinth_queue_manifest().await?;
+        if install_queue.get(&project_id).is_some(){
+            return Err("Cancel the queued install/update before disabling or removing this plugin".into())
+        }
+    }
     let (mut value,sha)=pending_content_actions().await?;
     let map=value.as_object_mut().ok_or("Invalid plugin queue")?;
     if map.len()>=100&&!map.contains_key(&project_id){
