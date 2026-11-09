@@ -233,6 +233,174 @@
       '</span></div>' + (pending ? '<button type="button" data-action="market-restart">Safely restart</button>' : '') + '</div>');
   }
 
+  function compatibleUpdate(id, record){
+    const release=state.latestReleases[id];
+    if(!release||release.pending||release.unavailable||!release.id)return null;
+    if(!record?.versionId||record.versionId===release.id)return null;
+    return release;
+  }
+  function renderInstalledManager(){
+    const area=document.getElementById("mc-installed-manager");
+    if(!area)return;
+    const {installed={},pluginFiles=[],datapackFiles=[]}=state.inventory;
+    const entries=Object.entries(installed).filter(([,entry])=>entry?.kind===state.kind);
+    const queued=Object.entries(state.queued).filter(([,entry])=>entry?.kind===state.kind);
+    const actions=Object.entries(state.contentActions);
+    const updates=entries.filter(([id,entry])=>
+      entry.enabled!==false&&!state.contentActions[id]&&compatibleUpdate(id,entry));
+    const knownNames=new Set(entries.map(([id,entry])=>"modrinth-"+id+(entry.kind==="plugin"?".jar":".zip")));
+    const unmanaged=(state.kind==="plugin"?pluginFiles:datapackFiles)
+      .filter(name=>!knownNames.has(name)).sort((a,b)=>a.localeCompare(b));
+    const title=state.tab==="installed"?"Installed content":
+      state.tab==="updates"?"Compatible updates":"Pending content changes";
+    const content=state.inventoryLoaded?(
+      state.tab==="queue"?
+        (queued.length||actions.length?
+          '<div class="mc-managed-list">'+
+          queued.map(([id,item])=>'<div class="mc-managed-row"><div><strong>'+
+            escape(item.title||id)+'</strong><span>Version '+escape(item.versionId)+
+            ' · Pending install/update</span></div><button class="btn small" data-market-action="unqueue" data-id="'+escape(id)+'">× Remove</button></div>').join("")+
+          actions.map(([id,action])=>'<div class="mc-managed-row"><div><strong>'+
+            escape(installed[id]?.title||id)+'</strong><span>Pending: '+escape(action)+
+            '</span></div><button class="btn small" data-market-action="cancel-content" data-id="'+escape(id)+'">× Remove</button></div>').join("")+'</div>':
+          '<div class="mc-managed-empty">No pending plugin or datapack changes.</div>'):
+      state.tab==="updates"?
+        (updates.length?'<div class="mc-managed-list">'+updates.map(([id,entry])=>
+          managedRow(id,entry,true)).join("")+'</div>':
+          '<div class="mc-managed-empty">'+(state.versionLoading?
+            'Checking installed projects for compatible releases…':
+            'No confirmed compatible updates found.')+'</div>'):
+      '<div class="mc-managed-list">'+
+        entries.map(([id,entry])=>managedRow(id,entry,false)).join("")+
+        unmanaged.map(name=>'<div class="mc-managed-row"><div><strong>'+
+          escape(name)+'</strong><span>Unmanaged file · Version unknown · Read-only</span></div>'+
+          '<span class="mc-managed-neutral">Unmanaged</span></div>').join("")+
+        (!entries.length&&!unmanaged.length?
+          '<div class="mc-managed-empty">No installed content detected.</div>':'')+
+      '</div>'
+    ):'<div class="mc-managed-empty">Checking installed content from the live server or verified backup…</div>';
+    area.innerHTML='<div class="mc-managed-heading"><div><h2>'+title+'</h2>'+
+      '<p>'+(state.online?'From the running Paper server':
+        'From the most recent verified backup')+
+      ' · Paper 26.3</p></div><div class="mc-managed-toolbar">'+
+      (state.tab==="updates"?
+        '<button type="button" data-market-action="update-all" class="btn primary small" '+
+        (state.updatingAll||state.versionLoading||!updates.length?'disabled':'')+
+        '>Queue '+updates.length+' update(s)</button>':'')+
+      '<button type="button" class="btn small" data-market-action="refresh-installed" '+
+      (state.inventoryBusy||state.versionLoading?'disabled':'')+'>Refresh versions</button></div></div>'+
+      '<div class="mc-managed-notice">Updates, disables and removals are staged for the next safe Paper startup. Plugin data and world backups remain intact.</div>'+
+      content+
+      '<p class="mc-managed-footnote">Only verified Modrinth-managed plugins can be disabled or removed here. Other JARs remain visible but cannot be modified by this manager.</p>';
+  }
+  function managedRow(id,record,updatesOnly){
+    const latest=state.latestReleases[id];
+    const update=compatibleUpdate(id,record);
+    const pending=state.queued[id];
+    const action=state.contentActions[id];
+    const checking=latest?.pending||!latest;
+    const available=latest&&!latest.pending&&!latest.unavailable&&latest.id;
+    const stateLabel=action?'Queued '+action:
+      pending?'Update queued':record.enabled===false?'Disabled':
+      update?'Update available':checking?'Checking versions…':
+      available?'Current version':'Version unavailable';
+    const commands=record.kind==="plugin"?
+      action?'<button type="button" class="btn small" data-market-action="cancel-content" data-id="'+escape(id)+'">Undo queued action</button>':
+        '<button type="button" class="btn small" data-market-action="content-action" data-value="'+
+          (record.enabled===false?'enable':'disable')+'" data-id="'+escape(id)+'">'+
+          (record.enabled===false?'Queue enable':'Queue disable')+'</button>'+
+        '<button type="button" class="btn small danger" data-market-action="content-action" data-value="remove" data-id="'+escape(id)+'">Queue removal</button>'
+      :'';
+    return '<div class="mc-managed-row"><div class="mc-managed-meta"><strong>'+
+      escape(record.title||id)+'</strong><span>Installed: '+escape(record.version||"Unknown")+
+      ' · '+escape(stateLabel)+
+      (update?' · Available: '+escape(update.version_number||update.name||"Compatible release"):'')+
+      '</span></div><div class="mc-managed-actions">'+
+      (update&&!pending&&!action&&record.enabled!==false?
+        '<button type="button" class="btn primary small" data-market-action="update-installed" data-id="'+
+        escape(id)+'" '+(state.updatingAll?'disabled':'')+'>Queue update</button>':'')+
+      (!updatesOnly?commands:'')+'</div></div>';
+  }
+  async function ensureContentActionsLoaded(force=false){
+    if(state.actionBusy||state.actionsLoaded&&!force)return;
+    state.actionBusy=true;
+    try{
+      const actions=await invoke("modrinth_content_actions_list");
+      state.contentActions=actions&&typeof actions==="object"?actions:{};
+      state.actionsLoaded=true;
+      if(active())renderInstalledManager();
+    }catch(error){status("Could not load queued plugin actions: "+String(error).slice(0,140),true);}
+    finally{state.actionBusy=false;}
+  }
+  async function loadManagedReleases(force=false){
+    if(state.versionLoading)return;
+    state.versionLoading=true;
+    try{
+      const entries=Object.entries(state.inventory.installed||{})
+        .filter(([,entry])=>entry?.kind===state.kind).slice(0,40);
+      for(const [id,entry] of entries){
+        if(!force&&state.latestReleases[id])continue;
+        state.latestReleases[id]={pending:true};
+        try{
+          const candidates=await invoke("modrinth_versions",{projectId:id,kind:entry.kind});
+          state.latestReleases[id]=Array.isArray(candidates)?
+            candidates.find(v=>v.version_type==="release")||candidates[0]||{unavailable:true}:
+            {unavailable:true};
+        }catch{state.latestReleases[id]={unavailable:true};}
+        if(active())renderInstalledManager();
+      }
+    }finally{state.versionLoading=false;if(active())renderInstalledManager();}
+  }
+  async function queueInstalledUpdate(projectId){
+    const record=state.inventory.installed?.[projectId];
+    const release=compatibleUpdate(projectId,record);
+    if(!record||!release||record.enabled===false||state.contentActions[projectId])return;
+    if(state.queued[projectId])return;
+    await invoke("modrinth_queue_add",{projectId,versionId:release.id,
+      kind:record.kind,title:record.title||projectId});
+    state.queued[projectId]={versionId:release.id,kind:record.kind,title:record.title||projectId};
+    renderInstalled();renderInstalledManager();
+  }
+  async function updateAll(){
+    if(state.updatingAll||state.versionLoading)return;
+    const available=Object.entries(state.inventory.installed||{})
+      .filter(([id,record])=>record?.kind===state.kind&&record.enabled!==false&&
+        !state.queued[id]&&!state.contentActions[id]&&compatibleUpdate(id,record));
+    if(!available.length)return status("No verified compatible updates are available.",false);
+    if(!window.confirm("Queue "+available.length+" compatible update(s) for the next safe Paper startup? "+
+      "Existing plugin data and the last verified backup will be preserved."))return;
+    state.updatingAll=true;let success=0,errors=[];
+    try{
+      for(const [id] of available){
+        try{await queueInstalledUpdate(id);success++;}
+        catch(error){errors.push(id+": "+String(error).slice(0,75));}
+      }
+      status(success+" update(s) queued."+(errors.length?" Failed: "+errors.slice(0,3).join("; "):""),Boolean(errors.length));
+    }finally{state.updatingAll=false;renderInstalledManager();}
+  }
+  async function setContentAction(projectId,action){
+    const entry=state.inventory.installed?.[projectId];
+    if(!entry||entry.kind!=="plugin"||!["enable","disable","remove"].includes(action))return;
+    if(!window.confirm("Queue "+action+" for "+(entry.title||projectId)+"?\n\n"+
+      "The action applies only at the next safe Paper startup. "+
+      (action==="remove"?"The JAR will be removed; plugin configuration data and verified backups remain.":"The plugin JAR is preserved for recovery.")))return;
+    try{
+      await invoke("modrinth_content_action_set",{projectId,action});
+      state.contentActions[projectId]=action;state.actionsLoaded=true;
+      status("Plugin "+action+" queued for next server startup.",false);
+      renderInstalledManager();
+    }catch(error){status("Could not queue plugin action: "+String(error).slice(0,160),true);}
+  }
+  async function cancelContentAction(projectId){
+    if(!state.contentActions[projectId])return;
+    try{
+      await invoke("modrinth_content_action_remove",{projectId});
+      delete state.contentActions[projectId];
+      renderInstalledManager();
+      status("Queued plugin action removed. Already applied changes are not reversed.",false);
+    }catch(error){status("Could not remove action: "+String(error).slice(0,160),true);}
+  }
+
   async function ensureQueueLoaded(){
     if(state.queueLoaded||state.queueBusy)return;
     state.queueBusy=true;
