@@ -234,10 +234,11 @@ async function sendPaper(kind,args={}){
 function latestServerRun(){return (state.overview?.runs||[]).find(r=>isServer(r))||null}
 function runRow(r,withCancel=false){
   const label=activeRun(r)?"Running":r.conclusion==="success"?"Successful":r.conclusion==="failure"?"Failed":r.conclusion||r.status||"Unknown";
-  const cls=activeRun(r)?"pending":r.conclusion==="failure"?"failed":"";
+  const cls=activeRun(r)?"pending":r.conclusion==="failure"?"failed":r.conclusion==="cancelled"?"cancelled":r.conclusion==="success"?"success":"neutral";
+  const glyph=cls==="pending"?"↻":cls==="failed"?"!":cls==="success"?"✓":cls==="cancelled"?"–":"·";
   const buttons=`<button class="btn small flat" data-action="jobs" data-id="${Number(r.id)}">Details</button>`+
     (withCancel&&activeRun(r)&&!isServer(r)?`<button class="btn small danger" data-action="cancel" data-id="${Number(r.id)}">Cancel</button>`:"");
-  return `<div class="run"><div class="run-icon ${cls}">${cls==="failed"?"!":activeRun(r)?"↻":"✓"}</div><div class="run-content"><strong>${esc(r.display_title||r.name||"GitHub workflow")}</strong><span>${esc(r.name||"")} · ${esc(ago(r.created_at))} · #${esc(r.run_number||r.id)}</span></div><span class="run-status ${cls}">${esc(label)}</span><span class="row-buttons">${buttons}</span></div>`;
+  return `<div class="run"><div class="run-icon ${cls}">${glyph}</div><div class="run-content"><strong>${esc(r.display_title||r.name||"GitHub workflow")}</strong><span>${esc(r.name||"")} · ${esc(ago(r.created_at))} · #${esc(r.run_number||r.id)}</span></div><span class="run-status ${cls}">${esc(label)}</span><span class="row-buttons">${buttons}</span></div>`;
 }
 // A phase-based (not fabricated percent) progress bar remains visible on every page.
 const lifecycleStages={
