@@ -69,21 +69,25 @@ def apply_content_actions(data: Path, manifest: Path):
         if action == "disable":
             if active.is_file():
                 if inactive.exists():
-                    raise ValueError("Disabled copy already exists; refusing to overwrite")
+                    print("::warning::Both active and disabled plugin copies exist; leaving them unchanged",flush=True)
+                    continue
                 disabled.mkdir(parents=True, exist_ok=True)
                 active.replace(inactive)
             elif not inactive.is_file():
-                raise ValueError("Plugin not found; cannot disable")
+                print("::warning::Cannot disable absent Modrinth plugin "+project,flush=True)
+                continue
             entry = inventory.get(project, {"kind": "plugin", "title": project,
                                             "versionId": None, "version": "Unknown"})
             inventory[project] = {**entry, "kind": "plugin", "enabled": False}
         elif action == "enable":
             if inactive.is_file():
                 if active.exists():
-                    raise ValueError("Active plugin already exists; refusing to overwrite")
+                    print("::warning::Both active and disabled plugin copies exist; leaving them unchanged",flush=True)
+                    continue
                 inactive.replace(active)
             elif not active.is_file():
-                raise ValueError("Plugin not found; cannot enable")
+                print("::warning::Cannot enable absent Modrinth plugin "+project,flush=True)
+                continue
             entry = inventory.get(project, {"kind": "plugin", "title": project,
                                             "versionId": None, "version": "Unknown"})
             inventory[project] = {**entry, "kind": "plugin", "enabled": True}
