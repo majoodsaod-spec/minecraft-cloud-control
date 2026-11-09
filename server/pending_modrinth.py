@@ -7,6 +7,7 @@ import json
 import re
 from pathlib import Path
 from modrinth_install import install_modrinth
+from pending_content_actions import desired_actions
 
 _ID = re.compile(r"^[A-Za-z0-9]{3,32}$")
 KINDS = {"plugin", "datapack"}
@@ -30,12 +31,16 @@ def queued_installs(manifest: Path):
         items.append((project_id,version_id,kind))
     return items
 
-def apply_modrinth_queue(data:Path, manifest:Path):
+def apply_modrinth_queue(data:Path, manifest:Path, actions_manifest:Path|None=None):
     queued=queued_installs(manifest)
+    actions=desired_actions(actions_manifest) if actions_manifest else {}
     if not queued:
         return []
     installed=[]
     for project_id,version_id,kind in queued:
+        if kind=="plugin" and actions.get(project_id) in ("disable","remove"):
+            print("Skipping queued Modrinth install for disabled/removed plugin "+project_id,flush=True)
+            continue
         try:
             result=install_modrinth(data,project_id,version_id,kind)
             installed.append(result)
