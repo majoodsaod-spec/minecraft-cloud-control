@@ -15,6 +15,8 @@ function statusFor(item){
   if(["mkdir","delete","rename"].includes(item.kind)&&
      typeof proof.operations?.[item.id]==="string")
     return {label:"Applied to saved world",kind:"applied"};
+  if(item.kind==="plugin-action"&&proof.content?.[item.id]===item.action)
+    return {label:"Applied to saved world",kind:"applied"};
   if(["plugin","datapack"].includes(item.kind)&&
      proof.installed?.[item.id]?.versionId===item.versionId)
     return {label:"Installed",kind:"applied"};
@@ -27,6 +29,7 @@ function title(item){
   if(item.kind==="delete")return "Delete file · "+item.path;
   if(item.kind==="plugin")return "Plugin · "+(item.title||item.id);
   if(item.kind==="datapack")return "Datapack · "+(item.title||item.id);
+  if(item.kind==="plugin-action")return "Plugin · "+item.id+" · "+item.action;
   return "Pending change";
 }
 function render(){
@@ -44,7 +47,7 @@ function render(){
       '<div class="server-manager-placeholder">No queued file, plugin, or datapack changes.</div>':
       '<div class="server-queue-items">'+items.map((item,i)=>{
         const status=statusFor(item);
-        const canRemove=["edit","mkdir","delete","rename","plugin","datapack"].includes(item.kind);
+        const canRemove=["edit","mkdir","delete","rename","plugin","datapack","plugin-action"].includes(item.kind);
         return '<div class="server-queue-item">'+
           '<span class="server-queue-number">'+String(i+1)+'</span>'+
           '<div class="server-queue-description"><strong>'+esc(title(item))+'</strong>'+
@@ -93,6 +96,8 @@ async function remove(kind,id){
   if(!window.confirm("Remove this queued change?\n\n"+title(item)+"\n\nChanges already applied to the server will not be reversed."))return;
   try{
     if(kind==="edit")await invoke("server_files_unstage",{path:item.path});
+    else if(kind==="plugin-action")
+      await invoke("modrinth_content_action_remove",{projectId:id});
     else if(kind==="plugin"||kind==="datapack")
       await invoke("modrinth_queue_remove",{projectId:id});
     else await invoke("server_operations_remove",{id});
