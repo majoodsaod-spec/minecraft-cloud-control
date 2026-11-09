@@ -33,7 +33,8 @@
     loaded: false, installing: "", notice: "", error: false, installed: [],
     queued: {}, queueLoaded: false, queueBusy: false,
     inventory: {installed:{},pluginFiles:[],datapackFiles:[]}, inventoryLoaded:false,inventoryBusy:false,
-    inventoryLive:null,latestReleases:{},
+    inventoryLive:null,latestReleases:{},tab:"browse",contentActions:{},actionsLoaded:false,
+    actionBusy:false,versionLoading:false,updatingAll:false,
     sortTouched: false,
     online: false, epoch: 0, searchTimer: null
   };
@@ -168,7 +169,7 @@
   function render(online) {
     const changedOnline=state.online!==Boolean(online);
     state.online = Boolean(online);
-    if(changedOnline){state.inventoryLoaded=false;state.latestReleases={};}
+    if(changedOnline){state.inventoryLoaded=false;state.latestReleases={};state.actionsLoaded=false;}
     const container = document.getElementById("content");
     if (!container) return;
     container.innerHTML = '<section id="mc-marketplace" class="mc-discover">' +
@@ -182,7 +183,14 @@
       '<button type="button" class="' + (state.kind === "datapack" ? "active" : "") +
       '" data-market-action="kind" data-value="datapack">▤ Data Packs</button>' +
       '<span>Modrinth</span></div>' +
-      '<div class="mc-discover-layout">' + filters() + '<div class="mc-discover-primary">' +
+      '<div class="mc-library-tabs" role="tablist" aria-label="Plugin management">'+
+      [["browse","Browse"],["installed","Installed"],["updates","Updates"],["queue","Queue"]]
+        .map(([key,label])=>'<button type="button" data-market-action="tab" data-value="'+key+
+          '" role="tab" aria-selected="'+(state.tab===key)+'" class="'+(state.tab===key?"active":"")+'">'+label+'</button>').join("")+
+      '</div>'+
+      '<section id="mc-installed-manager" class="mc-installed-manager" '+
+        (state.tab==="browse"?'hidden':'')+'></section>'+
+      '<div class="mc-discover-layout" '+(state.tab==="browse"?'':'style="display:none"')+'>' + filters() + '<div class="mc-discover-primary">' +
       '<form id="mc-market-search-form" class="mc-discover-search"><span>⌕</span>' +
       '<input id="mc-market-query" type="search" autocomplete="off" placeholder="Search ' +
       (state.kind === "plugin" ? "plugins" : "datapacks") + '…" value="' + escape(state.query) +
@@ -205,7 +213,9 @@
     if (slot) slot.classList.toggle("is-error", state.error);
     renderInstalled();
     renderResults();
+    renderInstalledManager();
     ensureQueueLoaded();
+    ensureContentActionsLoaded();
     ensureInventoryLoaded();
   }
 
