@@ -249,3 +249,25 @@ test("Offline backup viewer streams unbounded snapshot archives to disk",()=>{
   assert.match(serverRust,/fn cleanup_backup_cache\(\)/);
   assert.match(rust,/cleanup_backup_cache\(\)/);
 });
+
+test("Lifecycle operations show real stages and suppress stale uptime and empty time",()=>{
+  assert.match(html,/id="serverOperation"/);
+  assert.match(ui,/function syncServerOperation\(/);
+  assert.match(ui,/lifecycleStages/);
+  assert.match(ui,/function clockDisplay\(field\)/);
+  assert.match(ui,/if\(lifecycleActive\(\)\|\|!connectedLive\(\)/);
+  assert.match(ui,/stat\("Server uptime",clockDisplay\("uptime"\)/);
+  assert.match(ui,/stat\("Empty time",clockDisplay\("emptyFor"\)/);
+  assert.match(ui,/beginOperation\("restarting"\)/);
+  assert.match(ui,/beginOperation\("restoring"\)/);
+});
+test("Marketplace supports removing queued cards and installed version comparison",()=>{
+  assert.match(market,/data-market-action="unqueue"/);
+  assert.match(market,/mc-queue-remove/);
+  assert.match(market,/modrinth_installed_inventory/);
+  assert.match(market,/record\.versionId===latest\.id/);
+  assert.match(market,/Queue update/);
+  assert.match(market,/Version unavailable/);
+  assert.match(serverRust,/async fn modrinth_installed_inventory\(live:bool\)/);
+  assert.match(rust,/modrinth_installed_inventory/);
+});
