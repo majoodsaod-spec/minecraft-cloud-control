@@ -182,6 +182,19 @@ test("Resource history rejects missing metrics instead of inventing CPU or disk 
   assert.match(ui,/state\.metricHistory\.length>120/);
   assert.match(ui,/state\.metricSession!==snapshot\.session/);
 });
+test("Automations page exposes safe opt-in weekly maintenance settings",()=>{
+  const automation=readFileSync(new URL("../desktop/ui/automation.js",import.meta.url),"utf8");
+  assert.doesNotThrow(()=>new Function(automation));
+  assert.match(html,/data-page="automation"/);
+  assert.match(html,/automation\.js/);
+  assert.match(ui,/automation:drawAutomation/);
+  assert.match(automation,/github_file/);
+  assert.match(automation,/github_save_file/);
+  assert.match(automation,/automation-enabled/);
+  assert.match(automation,/weekly_maintenance/);
+  assert.match(automation,/window\.confirm/);
+  assert.match(automation,/state\.attempted/);
+});
 test("Automatic NetBird discovery verifies the control API rather than trusting a stale peer name",()=>{
   assert.match(rust,/async fn selected_direct_peer_ip\(\)/);
   assert.match(rust,/static VERIFIED_PEER:/);
