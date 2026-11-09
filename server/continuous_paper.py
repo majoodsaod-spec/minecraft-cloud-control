@@ -18,6 +18,7 @@ import zipfile
 
 from paper_lifecycle import DATA, OUTPUT, PREV, WORK, CONFIG, SKIP_NAMES, SKIP_FILES, digest, download_paper
 from runtime_bridge import LiveBridge
+from paper_metrics import PaperMetrics
 from direct_control import DirectControl
 from managed_plugins import install_managed_plugins
 from geyser_setup import configure_geyser
@@ -160,6 +161,7 @@ def run(jar: Path, recorder: LifecycleRecorder | None = None) -> None:
     bridge_restart = threading.Event()
     bridge_shutdown = threading.Event()
     observed = {"empty_since": time.monotonic(), "count": 0}
+    tick_metrics = PaperMetrics()
     def send(cmd: str) -> None:
         # Keep each command line atomic across the direct API, Cloudflare
         # bridge and lifecycle thread. Never interleave 'save-all' with a
@@ -173,6 +175,7 @@ def run(jar: Path, recorder: LifecycleRecorder | None = None) -> None:
         assert proc.stdout is not None
         for line in proc.stdout:
             print(line, end="", flush=True)
+            tick_metrics.observe(line)
             with lock:
                 log_lines.append(line.rstrip()[:400])
             if "Done (" in line and "For help" in line:
@@ -198,7 +201,8 @@ def run(jar: Path, recorder: LifecycleRecorder | None = None) -> None:
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
     bridge=LiveBridge(DATA,os.environ.get("GITHUB_RUN_ID",str(int(time.time()))),
-                      players,lock,log_lines,ready,send,bridge_restart,bridge_shutdown,observed,proc.pid)
+                      players,lock,log_lines,ready,send,bridge_restart,bridge_shutdown,observed,proc.pid,
+                      metrics=tick_metrics)
     direct=DirectControl(bridge)
     if recorder:
         bridge.startup_timings = recorder.public_timings()
@@ -219,6 +223,7 @@ def run(jar: Path, recorder: LifecycleRecorder | None = None) -> None:
             # not from the time Java was first launched.
             observed["empty_since"] = None if players else started
         warned = set()
+        next_tick_sample = 0.0
         # Pregenerate a modest starter area only while no players are online.
         # Chunky saves its own task progress across verified world snapshots.
         chunky_available = (DATA / "plugins" / "Chunky.jar").is_file()
@@ -246,6 +251,10 @@ def run(jar: Path, recorder: LifecycleRecorder | None = None) -> None:
             now = time.monotonic()
             elapsed = now - started
             remaining = MAX_SECONDS - elapsed
+            if now >= next_tick_sample and remaining > 60 and not (bridge_shutdown.is_set() or bridge_restart.is_set()):
+                send("tps")
+                send("mspt")
+                next_tick_sample = now + 15
             with lock:
                 empty_since = observed["empty_since"]
                 online_count = len(players)
