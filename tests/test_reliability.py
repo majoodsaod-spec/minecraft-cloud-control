@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-from reliability import LifecycleRecorder, verify_restored_world, markdown_summary
+from reliability import LifecycleRecorder, verify_restored_world, markdown_summary, expected_world_directory
 import handoff
 import recovery_gate
 
@@ -46,6 +46,20 @@ class TimingsTests(unittest.TestCase):
                 verify_restored_world(root, restore_required=True)
             (root / "world" / "level.dat").write_bytes(b"123456789abcdefg")
             verify_restored_world(root, restore_required=True)
+
+    def test_custom_level_name_restored_and_traversal_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "paper"
+            root.mkdir()
+            config = Path(tmp) / "settings.properties"
+            config.write_text("level-name=Custom World\n", encoding="utf-8")
+            (root / "Custom World").mkdir()
+            (root / "Custom World" / "level.dat").write_bytes(b"valid world save header")
+            self.assertEqual(expected_world_directory(root, config), root / "Custom World")
+            verify_restored_world(root, True, config)
+            config.write_text("level-name=../outside\n", encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                verify_restored_world(root, True, config)
 
     def test_no_report_uses_safe_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
