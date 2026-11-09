@@ -639,8 +639,8 @@ async fn server_operations_remove(id:String)->Result<Value,String>{
 // contents or private player data.
 #[tauri::command]
 async fn server_change_queue()->Result<Value,String>{
-    let (edits,operations,plugins)=tokio::try_join!(
-        pending_files(),pending_operations(),modrinth_queue_manifest()
+    let (edits,operations,plugins,actions)=tokio::try_join!(
+        pending_files(),pending_operations(),modrinth_queue_manifest(),pending_content_actions()
     )?;
     let mut items=Vec::<Value>::new();
     if let Some(map)=edits.0.as_object(){
@@ -669,15 +669,23 @@ async fn server_change_queue()->Result<Value,String>{
             }
         }
     }
+    if let Some(map)=actions.0.as_object(){
+        for (id,action) in map{
+            if let Some(action)=action.as_str(){
+                items.push(json!({"kind":"plugin-action","id":id,"action":action}));
+            }
+        }
+    }
     Ok(json!({"items":items,"count":items.len()}))
 }
 fn backup_queue_receipts(snapshot:&std::path::Path)->Result<Value,String>{
     let file=std::fs::File::open(snapshot).map_err(|_|"Cannot open verified backup")?;
     let mut zip=zip::ZipArchive::new(file).map_err(|_|"Invalid verified backup")?;
-    let mut result=json!({"operations":{},"edits":{},"installed":{}});
+    let mut result=json!({"operations":{},"edits":{},"installed":{},"content":{}});
     for (name,key) in [
         (".cloud-applied-ops.json","operations"),
         (".cloud-applied-edits.json","edits"),
+        (".cloud-applied-content.json","content"),
         ("plugins/.modrinth-installed.json","installed")
     ]{
         if let Ok(mut entry)=zip.by_name(name){
