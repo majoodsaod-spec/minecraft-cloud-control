@@ -1121,7 +1121,7 @@ async fn direct_command(kind: String, args: Value) -> Result<Value, String> {
         "whitelist-add","whitelist-remove","whitelist-on","whitelist-off",
         "op","deop","plugins-list","files-list","files-tree","files-read",
         "files-write","files-delete","files-mkdir","files-rename",
-        "files-upload","files-download","marketplace-install",
+        "files-upload","files-download","marketplace-install","marketplace-inventory",
     ];
     if !ALLOWED.contains(&kind.as_str()) { return Err("Unsupported Paper command".into());}
     if !args.is_object(){return Err("Invalid command arguments".into());}
@@ -1150,6 +1150,7 @@ pub fn run() {
             server_files_pending,server_files_stage,server_files_unstage,
             server_files_list,server_files_read,server_settings_get,server_settings_save,
             modrinth_queue_list,modrinth_queue_add,modrinth_queue_remove,
+            modrinth_installed_inventory,
             desktop_check_update,desktop_install_update,
             configure_cloudflare,cloudflare_status,cloudflare_command,cloudflare_console,
             server_restore_backup,
