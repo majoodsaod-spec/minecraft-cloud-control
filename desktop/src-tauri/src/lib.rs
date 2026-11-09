@@ -336,6 +336,7 @@ async fn desktop_install_update(app: tauri::AppHandle, expected_build: u64) -> R
 
 #[tauri::command]
 async fn github_download_backup(artifact_id: u64) -> Result<String, String> {
+    if artifact_id==0 {return Err("Select a valid world backup".into());}
     let token=secret(GITHUB_SECRET)?;
     let url=format!("https://api.github.com/repos/{REPO}/actions/artifacts/{artifact_id}/zip");
     let response=http().get(url).bearer_auth(token)
@@ -344,16 +345,53 @@ async fn github_download_backup(artifact_id: u64) -> Result<String, String> {
     if !response.status().is_success() {
         return Err(format!("GitHub couldn't download this artifact (HTTP {})",response.status().as_u16()));
     }
-    let folder=dirs::download_dir().ok_or("Windows Downloads folder not found")?;
-    let path=folder.join(format!("minecraft-world-{artifact_id}.zip"));
-    let mut file=tokio::fs::File::create(&path).await.map_err(|_|"Can't create backup file".to_owned())?;
-    use tokio::io::AsyncWriteExt;
-    let mut stream=response.bytes_stream();
-    while let Some(chunk)=stream.next().await {
-        file.write_all(&chunk.map_err(|_|"Backup download interrupted")?)
-            .await.map_err(|_|"Couldn't write backup file")?;
+    // A failed request must never replace a previously completed world backup.
+    const MAX_BACKUP_BYTES:u64=8*1024*1024*1024;
+    if response.content_length().is_some_and(|size|size>MAX_BACKUP_BYTES){
+        return Err("Backup exceeds the safe download size".into());
     }
-    file.flush().await.map_err(|_|"Couldn't finish writing backup")?;
+    let folder=dirs::download_dir().ok_or("Windows Downloads folder not found")?;
+    let mut path=folder.join(format!("minecraft-world-{artifact_id}.zip"));
+    for copy in 1..=100 {
+        if !path.exists(){break;}
+        path=folder.join(format!("minecraft-world-{artifact_id}-{copy}.zip"));
+    }
+    if path.exists(){return Err("Too many backups with this artifact ID already exist".into());}
+    let temporary=folder.join(format!(".minecraft-world-{artifact_id}-{}.part",std::process::id()));
+    use tokio::io::AsyncWriteExt;
+    let mut file=tokio::fs::File::create(&temporary).await
+        .map_err(|_|"Can't create temporary backup file".to_owned())?;
+    let mut stream=response.bytes_stream();
+    let result=async {
+        let mut received=0u64;
+        let mut first_chunk=true;
+        while let Some(item) = stream.next().await {
+            let chunk=item.map_err(|_|"Backup download interrupted".to_owned())?;
+            if first_chunk && !chunk.is_empty(){
+                first_chunk=false;
+                if !chunk.starts_with(b"PK"){
+                    return Err("GitHub returned data that is not a ZIP archive".to_owned());
+                }
+            }
+            received=received.checked_add(chunk.len() as u64)
+                .ok_or("Backup size overflow")?;
+            if received>MAX_BACKUP_BYTES{return Err("Backup exceeds the safe download size".into());}
+            file.write_all(&chunk).await.map_err(|_|"Couldn't write backup file".to_owned())?;
+        }
+        if received==0{return Err("GitHub returned an empty backup".into());}
+        file.flush().await.map_err(|_|"Couldn't finish writing backup".to_owned())?;
+        file.sync_all().await.map_err(|_|"Couldn't flush backup to disk".to_owned())?;
+        Ok::<(),String>(())
+    }.await;
+    drop(file);
+    if let Err(error)=result{
+        let _=tokio::fs::remove_file(&temporary).await;
+        return Err(error);
+    }
+    if let Err(_)=tokio::fs::rename(&temporary,&path).await{
+        let _=tokio::fs::remove_file(&temporary).await;
+        return Err("Couldn't finalize world backup in Downloads".into());
+    }
     Ok(path.to_string_lossy().into_owned())
 }
 fn cf_url() -> Result<String,String> {
