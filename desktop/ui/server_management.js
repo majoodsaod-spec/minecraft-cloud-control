@@ -21,7 +21,7 @@ const categoryOf=k=>{
  return "Other";
 };
 const state={
- dir:"",listing:null,selected:null,pending:{},loading:false,error:"",
+ dir:"",listing:null,selected:null,pending:{},loading:false,error:"",search:"",
  fileSaving:false,settingData:null,settingLoading:false,settingError:"",
  settingSaving:false,settingSearch:"",lastLive:null,lastRunning:null,
  fileLoadKey:null,settingsLoaded:false,edited:false
@@ -50,13 +50,15 @@ function fileActions(){
    '<textarea id="server-file-text" spellcheck="false" aria-label="Server file content" '+(editable?"":"readonly")+'>'+esc(file.content??"")+'</textarea>')+
    '<div class="server-manager-editor-actions">'+
    (editable?'<button type="button" class="btn primary" data-srv-action="save-file" '+(state.fileSaving?'disabled':'')+'>Queue change</button>':'')+
+   (editable?'<button type="button" class="btn" data-srv-action="rename-file">Rename</button>':'')+
+   (editable?'<button type="button" class="btn danger" data-srv-action="delete-file">Delete</button>':'')+
    (protectedFile?'<button type="button" class="btn" data-srv-action="go-settings">Open Server Settings</button>':'')+
    (staged?'<button type="button" class="btn" data-srv-action="discard">Discard queued edit</button>':'')+
    '</div><p class="field-tip">Queued changes apply the next time Paper starts. They do not modify the running world or an existing backup.</p>';
 }
 function rows(){
  if(!state.listing)return'<div class="server-manager-placeholder">Loading server files…</div>';
- const entries=Array.isArray(state.listing.entries)?state.listing.entries:[];
+ const entries=(Array.isArray(state.listing.entries)?state.listing.entries:[]).filter(entry=>!state.search||String(entry.name||"").toLowerCase().includes(state.search.toLowerCase()));
  if(!entries.length)return'<div class="server-manager-placeholder">This folder is empty.</div>';
  return entries.map(entry=>{
    const path=String(entry.path||"");
@@ -74,8 +76,12 @@ function renderFiles(live,running){
  if(!container)return;
  container.innerHTML='<div id="server-files-root" class="server-manager">'+
   '<div class="page-header"><div><div class="eyebrow">SERVER</div><h1>Server Files</h1>'+
-  '<p>Browse the server filesystem and queue text-file changes.</p></div>'+
-  '<button class="btn" data-srv-action="reload">Refresh files</button></div>'+
+  '<p>Browse server files and stage safe changes for the next Paper session.</p></div>'+
+  '<div class="header-actions"><button class="btn" data-srv-action="new-folder">New folder</button>'+
+  '<button class="btn" data-srv-action="new-file">New text file</button>'+
+  '<button class="btn" data-srv-action="upload-file">Upload text</button>'+
+  '<button class="btn" data-srv-action="reload">Refresh files</button></div></div>'+
+  '<input id="server-file-upload-input" type="file" accept=".txt,.json,.yml,.yaml,.properties,.conf,.cfg,.toml,.md" multiple hidden>'+
   '<div class="notice'+(running?"":" good")+'">'+
   (running?live?
     '<strong>Server running:</strong> files are read directly from Paper. Edits are queued and take effect only after the next safe restart.':
@@ -83,10 +89,13 @@ function renderFiles(live,running){
     '<strong>Server offline:</strong> viewing the latest verified backup. The backup cannot be edited directly; queued changes apply on the next startup.')+
   '</div><div class="server-manager-message" id="server-files-message" role="status" hidden></div>'+
   '<div class="server-manager-layout"><section class="panel server-manager-browser">'+
-  '<div class="server-manager-breadcrumb">'+paths()+'</div><div id="server-files-list">'+
+  '<div class="server-manager-breadcrumb">'+paths()+'</div>'+
+  '<div class="server-manager-file-search"><input id="server-file-search" type="search" placeholder="Search this folder…" value="'+esc(state.search)+'" aria-label="Search files in current folder"></div>'+
+  '<div id="server-files-list">'+
   (running&&!live?'<div class="server-manager-placeholder">Live file access unavailable. Connect Direct Paper via NetBird.</div>':rows())+
   '</div></section><section class="panel server-manager-preview" id="server-file-preview">'+fileActions()+
-  '</section></div></div>';
+  '</section></div><section class="panel server-manager-queue" id="server-change-queue"></section></div>';
+ window.ChangeQueue?.show?.(live,running);
  if(running&&!live)return;
  if(!state.listing||state.fileLoadKey!==String(live)+":"+state.dir)loadFiles();
 }
@@ -131,6 +140,7 @@ async function saveFile(){
   await invoke("server_files_stage",{path:state.selected.path,content});
   state.selected.content=content;state.pending[state.selected.path]=content;
   note("Queued successfully. Changes will apply at the next Paper startup.");
+  window.ChangeQueue?.reload?.();
  }catch(e){note(String(e),true)}
  finally{state.fileSaving=false;const area=document.querySelector("#server-file-preview");if(area)area.innerHTML=fileActions();
    const list=document.querySelector("#server-files-list");if(list)list.innerHTML=rows();}
@@ -139,6 +149,7 @@ async function discard(){
  if(!state.selected)return;
  try{await invoke("server_files_unstage",{path:state.selected.path});
    delete state.pending[state.selected.path];note("Queued change discarded.");
+   window.ChangeQueue?.reload?.();
    const area=document.querySelector("#server-file-preview");if(area)area.innerHTML=fileActions();
    const list=document.querySelector("#server-files-list");if(list)list.innerHTML=rows();
  }catch(e){note(String(e),true)}
