@@ -1,0 +1,7 @@
+{
+  "weekly_maintenance": {
+    "enabled": false,
+    "weekday_utc": 6,
+    "hour_utc": 3
+  }
+}
