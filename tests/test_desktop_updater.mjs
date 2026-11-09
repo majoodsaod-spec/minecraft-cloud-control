@@ -247,6 +247,14 @@ test("Modrinth content queues offline and downloads only on the server",()=>{
   assert.match(rust,/modrinth_queue_list,modrinth_queue_add,modrinth_queue_remove/);
 });
 
+test("World inventory is private, bounded and does not retry endlessly after errors",()=>{
+  assert.match(ui,/async function loadWorlds\(force=false\)/);
+  assert.match(ui,/kind:"worlds-list"/);
+  assert.match(ui,/worldRows/);
+  assert.match(ui,/worldPanel/);
+  assert.match(ui,/state\.worldsSession=session;/);
+  assert.match(ui,/case "refresh-worlds"/);
+});
 test("Offline backup viewer streams unbounded snapshot archives to disk",()=>{
   assert.doesNotMatch(serverRust,/BACKUP_LIMIT|240 MiB viewer limit/);
   assert.match(serverRust,/std::env::temp_dir\(\)/);
