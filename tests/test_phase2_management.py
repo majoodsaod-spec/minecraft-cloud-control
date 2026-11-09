@@ -173,6 +173,27 @@ class PlayersDirectoryTests(unittest.TestCase):
         self.assertIsNone(self.bridge._cpu_percent())
         self.assertIsNone(self.bridge._memory_mb())
 
+    def test_world_inventory_reports_only_aggregate_sizes(self):
+        world=self.data/"world"
+        (world/"playerdata").mkdir(parents=True)
+        (world/"level.dat").write_bytes(b"level data")
+        (world/"playerdata"/"secret-player-uuid.dat").write_bytes(b"secret")
+        (self.data/"world_nether").mkdir()
+        (self.data/"world_nether"/"level.dat").write_bytes(b"nether")
+        result=self.bridge._execute({"type":"worlds-list","args":{}})
+        self.assertEqual([item["name"] for item in result],["world","world_nether"])
+        self.assertEqual(result[0]["files"],2)
+        self.assertTrue(result[0]["hasLevelDat"])
+        self.assertNotIn("secret-player-uuid",json.dumps(result))
+        self.assertNotIn("playerdata",json.dumps(result))
+
+    def test_world_inventory_rejects_unsafe_level_name(self):
+        (self.data/"server.properties").write_text("level-name=../../outside")
+        (self.data/"world").mkdir()
+        (self.data/"world"/"level.dat").write_bytes(b"safe")
+        result=self.bridge._execute({"type":"worlds-list","args":{}})
+        self.assertEqual(result[0]["name"],"world")
+
     def test_java_and_bedrock_commands_use_safe_player_names(self):
         self.bridge._execute({"type":"whitelist-add","args":{"player":".BedrockA"}})
         self.bridge._execute({"type":"kick","args":{"player":"JavaUser"}})
