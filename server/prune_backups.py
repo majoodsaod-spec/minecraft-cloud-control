@@ -2,14 +2,14 @@
 
 Input: tab-separated created_at, artifact ID, producing run ID, size in bytes
 from GitHub Actions API. Only output deletion candidates when the current
-workflow's successfully uploaded backup is visible. Always keep five backups.
+workflow's successfully uploaded backup is visible. Always keep ten backups.
 """
 from __future__ import annotations
 
 import argparse
 import sys
 
-KEEP = 5
+KEEP = 10
 
 
 def select_prunable(lines: list[str], current_run: str, keep: int = KEEP) -> tuple[list[tuple[str, int]], int]:
@@ -38,8 +38,8 @@ def main() -> int:
     parser.add_argument("--current-run", required=True)
     parser.add_argument("--keep", type=int, default=KEEP)
     args = parser.parse_args()
-    if not args.current_run.isdecimal() or args.keep < 5:
-        parser.error("Expected numeric current run ID and at least five retained backups")
+    if not args.current_run.isdecimal() or args.keep < 10:
+        parser.error("Expected numeric current run ID and at least ten retained backups")
     ids, saved = select_prunable(sys.stdin.readlines(), args.current_run, args.keep)
     print(f"Retaining at least {args.keep} newest verified world backups; "
           f"eligible to reclaim {saved / 1048576:.1f} MiB.", file=sys.stderr)
