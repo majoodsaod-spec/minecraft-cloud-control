@@ -232,3 +232,11 @@ h1,h2,h3,.server-title,.page-header h1,.hero-title{color:#23343b;letter-spacing:
 @keyframes server-progress-shimmer{to{background-position:-200% 0}}
 @media(max-width:700px){.server-operation{margin:10px 12px 0;padding:12px}.server-operation-stage{font-size:9px}}
 @media(prefers-reduced-motion:reduce){.server-operation-stage.current i{animation:none}}
+
+/* Real Paper phase timings, measured rather than estimated. */
+.reliability-timings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px 24px;margin:8px 0 12px}
+.reliability-phase>div:first-child{display:flex;justify-content:space-between;gap:10px;color:#657a78;font-size:11px;margin-bottom:7px}
+.reliability-phase strong{color:#23513f;font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.reliability-track{height:6px;border-radius:999px;background:#edf2f0;overflow:hidden}
+.reliability-track i{display:block;height:100%;border-radius:999px;background:#36a780;max-width:100%}
+@media(max-width:700px){.reliability-timings{grid-template-columns:1fr}}
