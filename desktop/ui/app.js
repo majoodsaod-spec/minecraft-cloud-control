@@ -9,7 +9,7 @@ const duration=s=>{s=Math.max(0,Math.floor(Number(s)||0));return [Math.floor(s/3
 const activeRun=r=>["in_progress","queued","waiting","requested","pending"].includes(r?.status);
 const isServer=r=>(r?.name||"").includes("Continuous Paper Minecraft Server")||(r?.path||"").includes("paper-state-test.yml");
 const serverRunning=()=>connectedLive()||activeRun(latestServerRun());
-const state={operation:null,restoreInProgress:false,restoreMessage:"",page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,directStreamConnected:false,cloudFetchedAt:0,netbirdAuto:null,directPeerConfig:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null),metricHistory:[],metricSession:null,metricAt:0,metricHistoryLoadedSession:null,metricHistoryBusy:false};
+const state={operation:null,restoreInProgress:false,restoreMessage:"",page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,directStreamConnected:false,cloudFetchedAt:0,netbirdAuto:null,directPeerConfig:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null),metricHistory:[],metricSession:null,metricAt:0,metricHistoryLoadedSession:null,metricHistoryBusy:false,worlds:null,worldsLoading:false,worldsError:"",worldsFetchedAt:0,worldsSession:null};
 function flash(text){const box=$("#toast");box.textContent=text;box.classList.add("show");clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>box.classList.remove("show"),4300)}
 function btn(label,action="refresh",cls="",disabled=false){return `<button class="btn ${cls}" data-action="${action}" ${disabled?"disabled":""}>${label}</button>`}
 function boxEmpty(title,body,icon="◇"){return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${body}</p></div>`}
@@ -486,11 +486,43 @@ function drawPlayers(){
 function drawSettings(){
   window.ServerManager.renderSettings();
 }
+async function loadWorlds(force=false){
+  if(state.worldsLoading||!directOnline())return;
+  const session=state.direct?.session||null;
+  if(!force&&state.worldsSession===session&&Date.now()-state.worldsFetchedAt<60000)return;
+  state.worldsLoading=true;
+  state.worldsError="";
+  try{
+    const response=await invoke("direct_command",{kind:"worlds-list",args:{}});
+    if(!response?.ok||!Array.isArray(response.result))throw Error("Invalid world inventory reply");
+    state.worlds=response.result.slice(0,3);
+    state.worldsSession=session;
+  }catch(error){
+    state.worldsError=errorText(error);
+  }finally{
+    state.worldsFetchedAt=Date.now();
+    state.worldsLoading=false;
+    if(state.page==="backups"&&!editing())render();
+  }
+}
 function drawBackups(){
   const artifacts=(state.overview?.artifacts||[]).filter(a=>!a.expired&&a.name==="minecraft-world").sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  const connected=directOnline(),session=state.direct?.session||null;
+  if(connected&&!state.worldsLoading&&(state.worldsSession!==session||Date.now()-state.worldsFetchedAt>=60000)){
+    loadWorlds();
+  }
+  const worldRows=connected&&state.worldsSession===session&&Array.isArray(state.worlds)?
+    state.worlds.map(w=>`<div class="list-stat"><span>${esc(w.name||"World")}
+       ${w.hasLevelDat?"· level.dat present":""}${w.truncated?" · partial scan":""}</span>
+       <strong>${esc(w.sizeMiB??"—")} MiB · ${esc(w.files??"—")} files</strong></div>`).join(""):"";
+  const worldPanel=panel("World storage",worldRows||`<p class="field-tip">${esc(
+    !connected?"Connect directly to Paper to inspect world storage.":
+    state.worldsLoading?"Reading world storage…":state.worldsError||"No world directories found."
+  )}</p>`,connected?btn("↻ Refresh worlds","refresh-worlds","small flat"):"");
   $("#content").innerHTML=header("BACKUPS","World Backups","Download saved world snapshots.",btn("↻ Refresh","refresh","flat"))
    +notice("<strong>Important:</strong> Always wait for the server to finish saving and uploading a verified backup before shutting it down. Download critical backups to your own PC.")
    +(state.restoreMessage?notice(esc(state.restoreMessage),!state.restoreInProgress):"")
+   +worldPanel
    +panel("Available snapshots",artifacts.length?`<div class="run-list">${artifacts.map(a=>`<div class="run"><div class="run-icon">▤</div><div class="run-content"><strong>${esc(when(a.created_at))}</strong><span>Run #${esc(a.workflow_run?.id||"—")} · ${esc(bytes(a.size_in_bytes))}</span></div><div class="row-buttons"><button class="btn small primary" data-action="restore-backup" data-id="${Number(a.workflow_run?.id||0)}" ${state.restoreInProgress||!a.workflow_run?.id?"disabled":""}>Restore</button><button class="btn small flat" data-action="download" data-id="${Number(a.id)}">↓ Download ZIP</button></div></div>`).join("")}</div>`:boxEmpty("No snapshots found","Snapshots appear after a successful safe save and backup.","◷"));
 }
 function drawConnections(){
@@ -776,6 +808,7 @@ async function action(type,id){
     }finally{state.restoreInProgress=false;if(state.page==="backups")render();}
     return;
   }
+  case "refresh-worlds":{await loadWorlds(true);return;}
   case "download":{
     try{const file=await run("github_download_backup",{artifactId:Number(id)});flash("World backup saved to "+file);}catch{}return;
   }
