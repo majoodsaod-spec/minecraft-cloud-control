@@ -23,6 +23,8 @@ from managed_plugins import install_managed_plugins
 from geyser_setup import configure_geyser
 from pending_files import apply_pending
 from pending_modrinth import apply_modrinth_queue
+from reliability import LifecycleRecorder, verify_restored_world
+from contextlib import nullcontext
 
 IDLE_SECONDS = 3600
 MAX_SECONDS = 5 * 3600 + 30 * 60
@@ -137,9 +139,12 @@ def synchronize_plugins() -> None:
     print(f"Configured {len(source)} uploaded and {len(managed)} managed Paper plugins", flush=True)
 
 
-def run(jar: Path) -> None:
-    synchronize_plugins()
-    set_properties()
+def run(jar: Path, recorder: LifecycleRecorder | None = None) -> None:
+    with recorder.stage("plugin_setup") if recorder else nullcontext():
+        synchronize_plugins()
+    with recorder.stage("server_properties") if recorder else nullcontext():
+        set_properties()
+    java_started = time.monotonic()
     proc = subprocess.Popen(
         ["java", "-Xms2G", "-Xmx8G", "-jar", str(jar), "--nogui"],
         cwd=DATA, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -193,6 +198,8 @@ def run(jar: Path) -> None:
     bridge=LiveBridge(DATA,os.environ.get("GITHUB_RUN_ID",str(int(time.time()))),
                       players,lock,log_lines,ready,send,bridge_restart,bridge_shutdown,observed,proc.pid)
     direct=DirectControl(bridge)
+    if recorder:
+        bridge.startup_timings = recorder.public_timings()
     graceful = False
     try:
         bridge.start()
@@ -200,6 +207,10 @@ def run(jar: Path) -> None:
         if not ready.wait(180) or proc.poll() is not None:
             raise RuntimeError("Paper failed to start")
         started = time.monotonic()
+        if recorder:
+            recorder.record("paper_ready", started - java_started)
+            recorder.mark("ready")
+            bridge.startup_timings = recorder.public_timings()
         bridge.started = started
         with lock:
             # A server with no players begins counting from Paper readiness,
@@ -316,10 +327,14 @@ def run(jar: Path) -> None:
                 proc.wait()
         if graceful and (DATA / "world" / "level.dat").exists():
             bridge.phase("backing_up","Creating and verifying world backup")
+            backup_started = time.monotonic()
             snapshot()
             # Direct NetBird shutdown must stay OFF even if Cloudflare is
             # unavailable or still reports desired=on. This flag is consumed
             # by the workflow only after successful backup validation.
+            if recorder:
+                recorder.record("backup_verify", time.monotonic() - backup_started)
+                recorder.mark("saved")
             if bridge_shutdown.is_set():
                 (OUTPUT / "stop-requested").write_text("true\n")
                 print("Safe stop recorded; successor workflow will not be dispatched", flush=True)
@@ -332,12 +347,23 @@ def main() -> None:
     parser.parse_args()
     WORK.mkdir(exist_ok=True)
     DATA.mkdir(parents=True, exist_ok=True)
-    restore_snapshot()
-    apply_pending(DATA, WORK.parent / "server" / "pending-files.json")
-    apply_modrinth_queue(DATA, WORK.parent / "server" / "pending-modrinth.json")
-    config = json.loads(CONFIG.read_text())
-    jar = download_paper(config["minecraft_version"])
-    run(jar)
+    recorder = LifecycleRecorder(OUTPUT / "lifecycle-report.json")
+    try:
+        with recorder.stage("restore_backup"):
+            restore_snapshot()
+            verify_restored_world(DATA, os.environ.get("REQUIRE_RESTORE") == "true")
+        with recorder.stage("queued_file_changes"):
+            apply_pending(DATA, WORK.parent / "server" / "pending-files.json")
+        with recorder.stage("queued_modrinth"):
+            apply_modrinth_queue(DATA, WORK.parent / "server" / "pending-modrinth.json")
+        config = json.loads(CONFIG.read_text())
+        with recorder.stage("paper_download"):
+            jar = download_paper(config["minecraft_version"])
+        run(jar, recorder)
+    except Exception as exc:
+        if recorder.report["state"] != "failed":
+            recorder.failure("paper_runtime", type(exc).__name__)
+        raise
 
 
 if __name__ == "__main__":
