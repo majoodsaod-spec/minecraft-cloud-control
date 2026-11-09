@@ -47,6 +47,10 @@ async fn server_files_pending()->Result<Value,String>{
 async fn server_files_stage(path:String,content:String)->Result<Value,String>{
     if !safe_server_file(&path,true){return Err("This path is protected. Use Server Settings for server.properties. World files are read-only.".into())}
     if content.len()>TEXT_LIMIT||content.contains('\0'){return Err("Only UTF-8 text up to 128 KiB can be staged".into())}
+    let (operations,_)=pending_operations().await?;
+    if operations["operations"].as_array().is_some_and(|items|items.iter().any(|op|
+        op["path"].as_str()==Some(path.as_str())||op["target"].as_str()==Some(path.as_str())
+    )){return Err("Discard the queued rename/delete for this file before editing it".into())}
     let (mut manifest,sha)=pending_files().await?;
     if manifest.as_object().map(|m|m.len()>250).unwrap_or(true){return Err("Too many staged files".into())}
     manifest.as_object_mut().unwrap().insert(path.clone(),json!(content));
@@ -487,7 +491,7 @@ async fn server_operations_add(kind:String,path:String,target:Option<String>)->R
     let items=queue["operations"].as_array_mut().ok_or("Invalid operation entries")?;
     if items.len()>=100{return Err("Maximum of 100 staged file operations".into())}
     if items.iter().any(|item|
-        item["path"]==path||target.as_ref().is_some_and(|p|item["target"]==*p)
+        item["path"].as_str()==Some(path.as_str())||target.as_ref().is_some_and(|p|item["target"].as_str()==Some(p.as_str()))
     ){return Err("A queued file operation already uses this path".into())}
     let nanos=std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
