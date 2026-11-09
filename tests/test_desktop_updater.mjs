@@ -171,7 +171,9 @@ test("Uptime stays monotonic and does not reset when NetBird SSE reconnects",()=
   assert.match(ui,/function observeLiveClock\(/);
   assert.match(ui,/liveClock\.uptimeBase=Math\.max\(/);
   assert.match(ui,/observeLiveClock\(next,state\.directFetchedAt\)/);
-  assert.match(ui,/if\(!directOnline\(\)\)observeLiveClock\(state\.cloud/);
+  assert.match(ui,/if\(!directOnline\(\)\)/);
+  assert.match(ui,/observeLiveClock\(state\.cloud\?\.bridge\?\.status,state\.cloudFetchedAt\)/);
+  assert.match(ui,/recordMetric\(next\)/);
   assert.match(ui,/Keep the existing/);
 });
 test("Automatic NetBird discovery verifies the control API rather than trusting a stale peer name",()=>{
