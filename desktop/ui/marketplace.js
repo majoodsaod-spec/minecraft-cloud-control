@@ -51,6 +51,8 @@
       slot.textContent = state.notice;
       slot.hidden = !state.notice;
       slot.classList.toggle("is-error", state.error);
+      const manager=document.getElementById("mc-manager-status");
+      if(manager){manager.textContent=state.notice;manager.hidden=!state.notice;manager.classList.toggle("is-error",state.error); }
     }
   }
 
@@ -87,7 +89,7 @@
     const disabled = Boolean(state.installing) || state.version !== "26.3" ||
       Boolean(current&&!queued) || Boolean(checking&&!queued) || Boolean(unavailable&&!queued);
     const buttonLabel = installing?"Processing…" : queued?"Queued" :
-      current?"Installed" : checking?"Checking…" : unavailable?"Version unavailable" :
+      current?(record?.enabled===false?"Disabled":"Installed") : checking?"Checking…" : unavailable?"Version unavailable" :
       record && hasKnown ? (state.online?"Update":"Queue update") :
       state.online?"Install":"Queue install";
     return '<article class="mc-discover-card">' +
@@ -279,7 +281,9 @@
           '<div class="mc-managed-empty">No installed content detected.</div>':'')+
       '</div>'
     ):'<div class="mc-managed-empty">Checking installed content from the live server or verified backup…</div>';
-    area.innerHTML='<div class="mc-managed-heading"><div><h2>'+title+'</h2>'+
+    area.innerHTML='<div id="mc-manager-status" class="mc-discover-status" role="status" aria-live="polite" '+
+      (state.notice?'':'hidden')+'>'+escape(state.notice)+'</div>'+
+      '<div class="mc-managed-heading"><div><h2>'+title+'</h2>'+
       '<p>'+(state.online?'From the running Paper server':
         'From the most recent verified backup')+
       ' · Paper 26.3</p></div><div class="mc-managed-toolbar">'+
@@ -408,7 +412,7 @@
       const queued=await invoke("modrinth_queue_list");
       state.queued=queued&&typeof queued==="object"?queued:{};
       state.queueLoaded=true;
-      if(active()){renderInstalled();renderResults();}
+      if(active()){renderInstalled();renderResults();renderInstalledManager();}
     }catch(e){status("Could not load pending installs: "+String(e).slice(0,150),true)}
     finally{state.queueBusy=false;}
   }
@@ -417,7 +421,7 @@
     try{
       await invoke("modrinth_queue_remove",{projectId});
       delete state.queued[projectId];
-      renderInstalled();renderResults();
+      renderInstalled();renderResults();renderInstalledManager();
       status("Queued install removed.",false);
     }catch(e){status("Could not remove queued install: "+String(e).slice(0,150),true)}
   }
@@ -429,7 +433,7 @@
       if(inventory&&typeof inventory==="object"){
         state.inventory={installed:inventory.installed||{},pluginFiles:inventory.pluginFiles||[],datapackFiles:inventory.datapackFiles||[]};
         state.inventoryLoaded=true;state.inventoryLive=state.online;
-        if(active()){renderResults();loadLatestReleases();}
+        if(active()){renderResults();renderInstalledManager();loadLatestReleases();loadManagedReleases();}
       }
     }catch(error){
       // A server may have no backups yet. Browsing Modrinth still works.
@@ -552,7 +556,12 @@
     }
     if (action === "install") install(el.dataset.id);
     if (action === "unqueue") unqueue(el.dataset.id);
-    if (action === "refresh-installed") ensureInventoryLoaded(true);
+    if (action === "refresh-installed"){state.latestReleases={};ensureInventoryLoaded(true);}
+    if (action === "tab"){state.tab=value;render(state.online);if(value!=="browse")loadManagedReleases();return;}
+    if (action === "update-installed") queueInstalledUpdate(el.dataset.id).catch(e=>status("Could not queue update: "+String(e).slice(0,160),true));
+    if (action === "update-all") updateAll();
+    if (action === "content-action") setContentAction(el.dataset.id,value);
+    if (action === "cancel-content") cancelContentAction(el.dataset.id);
     if (action === "previous" && state.page > 0) {
       state.page--; search();
       root()?.scrollIntoView({ behavior: "smooth", block: "start" });
