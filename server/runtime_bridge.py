@@ -148,11 +148,14 @@ class LiveBridge:
                 record=self.data/filename
                 if not record.is_file():
                     return []
-                if record.stat().st_size>256*1024:
-                    raise ValueError("Player record exceeds safe limit")
-                saved=json.loads(record.read_text(encoding="utf-8"))
-                if not isinstance(saved,list):
-                    raise ValueError("Invalid player record format")
+                try:
+                    if record.stat().st_size>256*1024:
+                        return []
+                    saved=json.loads(record.read_text(encoding="utf-8"))
+                    if not isinstance(saved,list):
+                        return []
+                except (OSError,ValueError,UnicodeError):
+                    return []
                 found=set()
                 for entry in saved[:1000]:
                     if isinstance(entry,dict):
