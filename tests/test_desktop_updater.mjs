@@ -195,6 +195,13 @@ test("Automations page exposes safe opt-in weekly maintenance settings",()=>{
   assert.match(automation,/window\.confirm/);
   assert.match(automation,/state\.attempted/);
 });
+test("Spark diagnostics is manually confirmed and time bounded",()=>{
+  assert.match(ui,/case "spark-profile"/);
+  assert.match(ui,/dialog\("Profile Paper for 60 seconds\?"/);
+  assert.match(ui,/spark profiler start --timeout 60/);
+  assert.match(ui,/Live Console after one minute/);
+  assert.match(ui,/!connectedLive\(\)/);
+});
 test("Automatic NetBird discovery verifies the control API rather than trusting a stale peer name",()=>{
   assert.match(rust,/async fn selected_direct_peer_ip\(\)/);
   assert.match(rust,/static VERIFIED_PEER:/);
