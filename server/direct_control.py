@@ -75,7 +75,7 @@ class DirectControl:
                 uptime = max(0, int(time.monotonic() - b.started)) if ready else 0
                 empty_for = max(0, int(time.monotonic() - empty_since)) if empty_since is not None and not players else 0
                 return {
-                    "ready": ready, "phase": "running" if ready else "starting",
+                    "ready": ready, "phase": b.lifecycle_phase if b.lifecycle_phase!="starting" else ("running" if ready else "starting"),
                     "session": b.session, "updatedAt": int(time.time() * 1000),
                     "uptime": uptime, "restartIn": max(0, 19800 - uptime),
                     "emptyFor": empty_for, "players": players, "logs": logs,
