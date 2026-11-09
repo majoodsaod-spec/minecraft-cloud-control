@@ -82,6 +82,7 @@ class DirectControl:
                     "memoryMiB": b._memory_mb(), "memoryLimitMiB": 8192,
                     "cpuPercent": getattr(b,"_cpu_percent",lambda:None)(),
                     **getattr(b,"_disk_space",lambda:{"diskFreeMiB":None,"diskTotalMiB":None})(),
+                    **(b.metrics.snapshot() if getattr(b,"metrics",None) is not None else {"tps":None,"mspt":None}),
                     "connection": "netbird",
                     "startupTimings": dict(getattr(b, "startup_timings", {})),
                 }
