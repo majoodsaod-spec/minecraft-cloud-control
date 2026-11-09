@@ -9,7 +9,7 @@ const duration=s=>{s=Math.max(0,Math.floor(Number(s)||0));return [Math.floor(s/3
 const activeRun=r=>["in_progress","queued","waiting","requested","pending"].includes(r?.status);
 const isServer=r=>(r?.name||"").includes("Continuous Paper Minecraft Server")||(r?.path||"").includes("paper-state-test.yml");
 const serverRunning=()=>connectedLive()||activeRun(latestServerRun());
-const state={operation:null,restoreInProgress:false,restoreMessage:"",page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,directStreamConnected:false,cloudFetchedAt:0,netbirdAuto:null,directPeerConfig:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null)};
+const state={operation:null,restoreInProgress:false,restoreMessage:"",page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,directStreamConnected:false,cloudFetchedAt:0,netbirdAuto:null,directPeerConfig:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null),metricHistory:[],metricSession:null,metricAt:0};
 function flash(text){const box=$("#toast");box.textContent=text;box.classList.add("show");clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>box.classList.remove("show"),4300)}
 function btn(label,action="refresh",cls="",disabled=false){return `<button class="btn ${cls}" data-action="${action}" ${disabled?"disabled":""}>${label}</button>`}
 function boxEmpty(title,body,icon="◇"){return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${body}</p></div>`}
@@ -219,7 +219,7 @@ async function loadDirect(quiet=true){
   if(state.directStreamConnected)return;
   if(pendingDirectStatus)return pendingDirectStatus;
   pendingDirectStatus=(async()=>{
-    try{state.direct=await run("direct_status",{}, {quiet});state.directFetchedAt=Date.now();state.directError=null;observeLiveClock(state.direct,state.directFetchedAt);}
+    try{state.direct=await run("direct_status",{}, {quiet});state.directFetchedAt=Date.now();state.directError=null;recordMetric(state.direct);observeLiveClock(state.direct,state.directFetchedAt);}
     catch(err){state.directError=errorText(err);state.directStreamConnected=false;}
   })();
   try{return await pendingDirectStatus;}
@@ -343,6 +343,39 @@ function recoveryWarning(){
   return notice('<strong>Recovery needs review.</strong> The latest Paper workflow ended without a verified backup. Automatic recovery will not restore an older world without confirmation. Review the runner logs or select a backup from World Backups.')+
     '<div class="header-actions" style="margin:0 0 14px"><button class="btn small" data-action="server-logs">Review runner logs</button><button class="btn small" data-page="backups">World Backups</button></div>';
 }
+function recordMetric(snapshot){
+  if(!snapshot||!snapshot.ready||!snapshot.session)return;
+  const cpu=Number(snapshot.cpuPercent),memory=Number(snapshot.memoryMiB);
+  const limit=Number(snapshot.memoryLimitMiB),free=Number(snapshot.diskFreeMiB);
+  if(!Number.isFinite(cpu)||!Number.isFinite(memory)||!Number.isFinite(limit)||limit<=0)return;
+  const now=Date.now();
+  if(state.metricSession!==snapshot.session){
+    state.metricSession=snapshot.session;state.metricHistory=[];state.metricAt=0;
+  }
+  if(now-state.metricAt<5000)return;
+  state.metricAt=now;
+  state.metricHistory.push({at:now,cpu:Math.max(0,cpu),memory:Math.max(0,100*memory/limit),
+    diskFree:Number.isFinite(free)?free:null});
+  if(state.metricHistory.length>120)state.metricHistory.shift();
+}
+function resourceHistory(){
+  const points=state.metricHistory;
+  if(points.length<2)return panel("Resource history",'<p class="field-tip">Collecting live samples. A chart appears after at least two readings; history resets when Paper restarts.</p>');
+  const line=(field,max)=>points.map((item,i)=>{
+    const x=Number((12+i*576/(points.length-1)).toFixed(2));
+    const y=Number((106-Math.min(max,item[field])*90/max).toFixed(2));
+    return (i?"L":"M")+x+" "+y;
+  }).join(" ");
+  const last=points[points.length-1],live=currentPaper();
+  const pressure=last.memory>=90?"High Java memory pressure":last.diskFree!==null&&last.diskFree<1024?"Runner disk space is low":"No resource threshold reached";
+  return panel("Resource history",`<div class="metric-legend"><span>● CPU (0–400% scale)</span><span>● Java memory (% of configured heap)</span></div>
+    <svg class="resource-chart" viewBox="0 0 600 120" role="img" aria-label="Recent Paper CPU and memory usage trends">
+      <path d="M12 16H588 M12 61H588 M12 106H588" fill="none" stroke="#e6eceb" stroke-width="1"/>
+      <path d="${line("cpu",400)}" fill="none" stroke="#16886b" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+      <path d="${line("memory",100)}" fill="none" stroke="#6e85c6" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg><div class="list-stat"><span>Resource check</span><strong>${esc(pressure)}</strong></div>
+    <p class="field-tip">Up to ten minutes of readings in this app session; CPU may exceed 100% on multicore runners. Disk readings describe temporary runner space, not stored world backups.</p>`);
+}
 function drawOverview(){
   const main=latestServerRun(),live=currentPaper(),online=connectedLive();
   const github=state.github.connected;
@@ -370,7 +403,7 @@ function drawOverview(){
    ${panel("Recent activity",recent.length?`<div class="run-list">${recent.map(r=>runRow(r)).join("")}</div>`:boxEmpty("No runs loaded","Connect your GitHub account to see recent activity.","⎇"),`<button class="btn small flat" data-page="workflows">View all →</button>`)}
    ${panel("Connection health",`<div class="list-stat"><span>GitHub</span><strong>${github?"● Connected":"○ Not connected"}</strong></div><div class="list-stat"><span>Direct Paper · NetBird</span><strong>${directOnline()?"● Connected":"○ Not connected"}</strong></div>${!directOnline()&&state.directError?`<p class="field-tip" style="margin:10px 0 12px;color:#ae624f">Direct connection: ${esc(state.directError)}</p>`:""}<div class="list-stat"><span>Cloudflare bridge</span><strong>${state.cloud?.bridge?.status?.ready?"● Connected":"○ Offline / unavailable"}</strong></div><div class="list-stat"><span>NetBird live stream</span><strong>${state.directStreamConnected?"● Streaming":directOnline()?"◷ Polling":"○ Not connected"}</strong></div><div class="list-stat"><span>Last direct heartbeat</span><strong>${state.directFetchedAt?Math.floor((Date.now()-state.directFetchedAt)/1000)+" s ago":"—"}</strong></div><div class="list-stat"><span>Minecraft workflow</span><strong>${main?esc(main.conclusion||main.status||"unknown"):"—"}</strong></div><div class="list-stat"><span>Latest run</span><strong>${main?esc("#"+main.run_number):"—"}</strong></div><div class="list-stat"><span>World backups</span><strong>${(state.overview?.artifacts||[]).filter(a=>!a.expired).length}</strong></div><p class="field-tip" style="margin-top:18px">GitHub workflow management works without Cloudflare. Safe live commands need a working server bridge.</p>`)}
    </div>`;
-  $("#content").innerHTML=header("SERVER","Overview","Manage your server, plugins, files and backups.",btn("↻ Refresh","refresh","flat"))+hero+recoveryWarning()+stats+runnerCard+startupDiagnostics()+actions;
+  $("#content").innerHTML=header("SERVER","Overview","Manage your server, plugins, files and backups.",btn("↻ Refresh","refresh","flat"))+hero+recoveryWarning()+stats+(online&&!pendingOperation?resourceHistory():"")+runnerCard+startupDiagnostics()+actions;
 }
 function drawWorkflows(){
   const workflows=(state.workflows||[]).filter(w=>w.state!=="deleted"),runs=state.overview?.runs||[];
@@ -488,7 +521,7 @@ async function loadOverview(quiet=false){
   catch(e){if(!quiet)flash(errorText(e));}
 }
 async function loadCloud(quiet=true){
-  try{state.cloud=await run("cloudflare_status",{}, {quiet});state.cloudFetchedAt=Date.now();state.cloudError=null;if(!directOnline())observeLiveClock(state.cloud?.bridge?.status,state.cloudFetchedAt);}
+  try{state.cloud=await run("cloudflare_status",{}, {quiet});state.cloudFetchedAt=Date.now();state.cloudError=null;if(!directOnline()){recordMetric(state.cloud?.bridge?.status);observeLiveClock(state.cloud?.bridge?.status,state.cloudFetchedAt);}}
   catch(e){state.cloudError=errorText(e);state.cloud=null;state.cloudFetchedAt=0;}
 }
 async function loadGithubServerLog(quiet=true){
@@ -539,6 +572,7 @@ async function startApp(){
       state.directStreamConnected=true;
       state.directFetchedAt=Date.now();
       state.directError=null;
+      recordMetric(next);
       observeLiveClock(next,state.directFetchedAt);
       syncServerOperation();
       const changes=JSON.stringify({
