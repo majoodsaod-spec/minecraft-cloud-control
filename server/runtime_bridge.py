@@ -149,6 +149,55 @@ class LiveBridge:
             name=args.get("player","")
             if not isinstance(name,str) or not USERNAME.fullmatch(name):raise ValueError("Invalid player name")
             return name
+        if kind=="worlds-list":
+            # Aggregate read-only world stats. Never return file paths,
+            # playerdata, inventories or the contents of any level.dat.
+            configured="world"
+            props=self.data/"server.properties"
+            try:
+                for line in props.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("level-name="):
+                        candidate=line.partition("=")[2].strip()
+                        if re.fullmatch(r"[A-Za-z0-9_-]{1,64}",candidate):
+                            configured=candidate
+                        break
+            except (OSError,UnicodeError):
+                pass
+            result=[]
+            for name in (configured,configured+"_nether",configured+"_the_end"):
+                root=self.data/name
+                if root.is_symlink() or not root.is_dir():
+                    continue
+                files=0
+                bytes_used=0
+                truncated=False
+                stack=[root]
+                while stack:
+                    folder=stack.pop()
+                    try:
+                        with os.scandir(folder) as entries:
+                            children=list(entries)
+                    except OSError:
+                        continue
+                    for entry in children:
+                        if files>=25000:
+                            truncated=True
+                            stack.clear()
+                            break
+                        try:
+                            if entry.is_symlink():
+                                continue
+                            if entry.is_dir(follow_symlinks=False):
+                                stack.append(Path(entry.path))
+                            elif entry.is_file(follow_symlinks=False):
+                                files+=1
+                                bytes_used+=entry.stat(follow_symlinks=False).st_size
+                        except OSError:
+                            continue
+                result.append({"name":name,"sizeMiB":round(bytes_used/1048576,1),
+                               "files":files,"truncated":truncated,
+                               "hasLevelDat":(root/"level.dat").is_file()})
+            return result
         if kind=="performance-history":
             return self.performance_history.snapshot()
         if kind=="players-list":
