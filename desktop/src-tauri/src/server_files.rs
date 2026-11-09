@@ -1,12 +1,11 @@
-use std::io::{Read,Cursor};
+use std::io::{Read,Write};
 use std::sync::Arc;
 use base64::Engine;
 use sha2::{Digest,Sha256};
 
 const STAGED_FILES:&str="server/pending-files.json";
-const BACKUP_LIMIT:usize=240*1024*1024;
 const TEXT_LIMIT:usize=128*1024;
-static FILE_BACKUP:OnceLock<tokio::sync::Mutex<Option<(u64,Arc<Vec<u8>>)>>> = OnceLock::new();
+static FILE_BACKUP:OnceLock<tokio::sync::Mutex<Option<(u64,Arc<std::path::PathBuf>)>>> = OnceLock::new();
 
 fn safe_server_file(path:&str,write:bool)->bool {
     if path.is_empty() {return !write;}
@@ -69,7 +68,9 @@ async fn server_files_unstage(path:String)->Result<Value,String>{
         "content":encode_content(&(data+"\n"))}))).await?;
     Ok(json!({"ok":true}))
 }
-async fn verified_backup()->Result<(u64,Arc<Vec<u8>>),String>{
+// The offline viewer streams backup archives to per-process disk files,
+// rather than imposing an arbitrary snapshot-size or RAM limit.
+async fn verified_backup()->Result<(u64,Arc<std::path::PathBuf>),String>{
     let artifacts=github("/actions/artifacts?name=minecraft-world&per_page=50",reqwest::Method::GET,None).await?;
     let chosen=artifacts["artifacts"].as_array().ok_or("Backup listing unavailable")?
         .iter().filter(|a|a["name"]=="minecraft-world"&&a["expired"]==false)
@@ -79,46 +80,91 @@ async fn verified_backup()->Result<(u64,Arc<Vec<u8>>),String>{
     let cache=FILE_BACKUP.get_or_init(||tokio::sync::Mutex::new(None));
     {
         let guard=cache.lock().await;
-        if let Some((cached,bytes))=&*guard {if *cached==id{return Ok((id,Arc::clone(bytes)))}}
+        if let Some((cached,path))=&*guard {
+            if *cached==id && path.is_file(){return Ok((id,Arc::clone(path)))}
+        }
     }
     let token=secret(GITHUB_SECRET)?;
     let response=http().get(format!("https://api.github.com/repos/{REPO}/actions/artifacts/{id}/zip"))
         .bearer_auth(token).header("Accept","application/vnd.github+json")
         .send().await.map_err(|_|"Unable to retrieve the world backup")?;
     if !response.status().is_success(){return Err(format!("Backup download HTTP {}",response.status().as_u16()))}
-    if response.content_length().unwrap_or(0)>BACKUP_LIMIT as u64{return Err("Backup exceeds 240 MiB viewer limit".into())}
-    let mut outer=Vec::new();
-    let mut chunks=response.bytes_stream();
-    while let Some(part)=chunks.next().await{
-        let part=part.map_err(|_|"Backup transfer interrupted")?;
-        if outer.len()+part.len()>BACKUP_LIMIT{return Err("Backup exceeds 240 MiB viewer limit".into())}
-        outer.extend_from_slice(&part);
+
+    let folder=std::env::temp_dir().join(format!("minecraft-cloud-view-{}",std::process::id()));
+    tokio::fs::create_dir_all(&folder).await.map_err(|_|"Cannot create backup viewer cache")?;
+    let artifact_path=folder.join(format!("{id}.artifact.zip"));
+    let snapshot_path=folder.join(format!("{id}.worlds.zip"));
+    let outcome:Result<(),String>=async {
+        use tokio::io::AsyncWriteExt;
+        let mut outer=tokio::fs::File::create(&artifact_path).await
+            .map_err(|_|"Cannot create backup download file")?;
+        let mut chunks=response.bytes_stream();
+        while let Some(part)=chunks.next().await{
+            let part=part.map_err(|_|"Backup transfer interrupted")?;
+            outer.write_all(&part).await.map_err(|_|"Not enough free disk space for backup")?;
+        }
+        outer.flush().await.map_err(|_|"Cannot finish backup download")?;
+        drop(outer);
+        let source=artifact_path.clone();
+        let dest=snapshot_path.clone();
+        tokio::task::spawn_blocking(move||->Result<(),String>{
+            let outer=std::fs::File::open(source).map_err(|_|"Cannot open downloaded backup")?;
+            let mut artifact=zip::ZipArchive::new(outer).map_err(|_|"Invalid GitHub artifact ZIP")?;
+            let mut expected=String::new();
+            {
+                let mut hash=artifact.by_name("worlds.zip.sha256")
+                    .map_err(|_|"Backup missing checksum")?;
+                hash.take(256).read_to_string(&mut expected)
+                    .map_err(|_|"Cannot read backup checksum")?;
+            }
+            let mut hasher=Sha256::new();
+            {
+                let mut backup=artifact.by_name("worlds.zip")
+                    .map_err(|_|"Backup missing worlds.zip")?;
+                let mut out=std::fs::File::create(dest)
+                    .map_err(|_|"Cannot create backup snapshot cache")?;
+                let mut buffer=[0_u8;128*1024];
+                loop{
+                    let read=backup.read(&mut buffer).map_err(|_|"Cannot extract snapshot")?;
+                    if read==0{break;}
+                    hasher.update(&buffer[..read]);
+                    out.write_all(&buffer[..read])
+                        .map_err(|_|"Not enough free disk space for backup snapshot")?;
+                }
+                out.flush().map_err(|_|"Cannot finalize snapshot cache")?;
+            }
+            if format!("{:x}",hasher.finalize())!=expected.trim(){
+                return Err("Backup SHA-256 mismatch; refusing to open".into());
+            }
+            Ok(())
+        }).await.map_err(|_|"Backup verification thread failed")?
+    }.await;
+    // The outer artifact is no longer needed after checksum verification.
+    let _=tokio::fs::remove_file(&artifact_path).await;
+    if let Err(err)=outcome{
+        let _=tokio::fs::remove_file(&snapshot_path).await;
+        return Err(err)
     }
-    let inner=tokio::task::spawn_blocking(move||->Result<Vec<u8>,String>{
-        let mut artifact=zip::ZipArchive::new(Cursor::new(outer)).map_err(|_|"Invalid GitHub artifact ZIP")?;
-        let mut inner=Vec::new();
-        {
-            let backup=artifact.by_name("worlds.zip").map_err(|_|"Backup missing worlds.zip")?;
-            backup.take(BACKUP_LIMIT as u64+1).read_to_end(&mut inner)
-                .map_err(|_|"Cannot extract server snapshot")?;
+    let snapshot_path=Arc::new(snapshot_path);
+    let mut guard=cache.lock().await;
+    if let Some((old_id,old_path))=guard.take(){
+        if old_id!=id && old_path!=snapshot_path {
+            let _=tokio::fs::remove_file(old_path.as_ref()).await;
         }
-        if inner.len()>BACKUP_LIMIT{return Err("Uncompressed snapshot exceeds limit".into())}
-        let mut expected=String::new();
-        {
-            let hash=artifact.by_name("worlds.zip.sha256").map_err(|_|"Backup missing checksum")?;
-            hash.take(256).read_to_string(&mut expected).map_err(|_|"Cannot read backup checksum")?;
-        }
-        if format!("{:x}",Sha256::digest(&inner))!=expected.trim(){
-            return Err("Backup SHA-256 mismatch; refusing to open".into());
-        }
-        Ok(inner)
-    }).await.map_err(|_|"Backup verification thread failed")??;
-    let inner=Arc::new(inner);
-    *cache.lock().await=Some((id,Arc::clone(&inner)));
-    Ok((id,inner))
+    }
+    *guard=Some((id,Arc::clone(&snapshot_path)));
+    Ok((id,snapshot_path))
 }
-fn browse_backup(bytes:&[u8],folder:&str,file:Option<&str>)->Result<Value,String>{
-    let mut archive=zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_|"Invalid world snapshot")?;
+fn cleanup_backup_cache(){
+    if let Some(cache)=FILE_BACKUP.get(){
+        if let Ok(mut guard)=cache.try_lock(){
+            if let Some((_,path))=guard.take(){let _=std::fs::remove_file(path.as_ref());}
+        }
+    }
+}
+fn browse_backup(snapshot:&std::path::Path,folder:&str,file:Option<&str>)->Result<Value,String>{
+    let source=std::fs::File::open(snapshot).map_err(|_|"Cannot open verified snapshot")?;
+    let mut archive=zip::ZipArchive::new(source).map_err(|_|"Invalid world snapshot")?;
     if let Some(path)=file{
         if !safe_server_file(path,false){return Err("Protected server file".into())}
         if !["txt","json","yml","yaml","properties","conf","cfg","toml","md","log"]
@@ -162,7 +208,7 @@ async fn server_files_list(path:String,live:bool)->Result<Value,String>{
     }
     let (artifact,backup)=verified_backup().await?;
     let path_copy=path.clone();
-    let mut result=tokio::task::spawn_blocking(move||browse_backup(&backup,&path_copy,None))
+    let mut result=tokio::task::spawn_blocking(move||browse_backup(backup.as_path(),&path_copy,None))
         .await.map_err(|_|"Backup file index failed")??;
     result["artifactId"]=json!(artifact);
     Ok(result)
@@ -177,7 +223,7 @@ async fn server_files_read(path:String,live:bool)->Result<Value,String>{
         return Ok(result)
     }
     let (artifact,backup)=verified_backup().await?;
-    let mut result=tokio::task::spawn_blocking(move||browse_backup(&backup,"",Some(&path)))
+    let mut result=tokio::task::spawn_blocking(move||browse_backup(backup.as_path(),"",Some(&path)))
         .await.map_err(|_|"Backup read failed")??;
     result["artifactId"]=json!(artifact);
     Ok(result)
