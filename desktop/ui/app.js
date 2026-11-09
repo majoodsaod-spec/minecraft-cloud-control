@@ -9,7 +9,7 @@ const duration=s=>{s=Math.max(0,Math.floor(Number(s)||0));return [Math.floor(s/3
 const activeRun=r=>["in_progress","queued","waiting","requested","pending"].includes(r?.status);
 const isServer=r=>(r?.name||"").includes("Continuous Paper Minecraft Server")||(r?.path||"").includes("paper-state-test.yml");
 const serverRunning=()=>connectedLive()||activeRun(latestServerRun());
-const state={restoreInProgress:false,restoreMessage:"",page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,directStreamConnected:false,cloudFetchedAt:0,netbirdAuto:null,directPeerConfig:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null)};
+const state={operation:null,restoreInProgress:false,restoreMessage:"",page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,directStreamConnected:false,cloudFetchedAt:0,netbirdAuto:null,directPeerConfig:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null)};
 function flash(text){const box=$("#toast");box.textContent=text;box.classList.add("show");clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>box.classList.remove("show"),4300)}
 function btn(label,action="refresh",cls="",disabled=false){return `<button class="btn ${cls}" data-action="${action}" ${disabled?"disabled":""}>${label}</button>`}
 function boxEmpty(title,body,icon="◇"){return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${body}</p></div>`}
@@ -163,8 +163,8 @@ function tickLiveUI(){
   const uptime=document.querySelector('[data-live="uptime"]');
   const empty=document.querySelector('[data-live="empty"]');
   const runner=document.querySelector('[data-live="runner"]');
-  if(uptime)uptime.textContent=liveClock.session?duration(interpolatedPaperSeconds("uptime")):"—";
-  if(empty)empty.textContent=liveClock.session?duration(interpolatedPaperSeconds("emptyFor")):"—";
+  if(uptime)uptime.textContent=clockDisplay("uptime");
+  if(empty)empty.textContent=clockDisplay("emptyFor");
   if(runner){
     const main=latestServerRun();
     const started=main&&(main.run_started_at||main.created_at);
@@ -239,6 +239,78 @@ function runRow(r,withCancel=false){
     (withCancel&&activeRun(r)&&!isServer(r)?`<button class="btn small danger" data-action="cancel" data-id="${Number(r.id)}">Cancel</button>`:"");
   return `<div class="run"><div class="run-icon ${cls}">${cls==="failed"?"!":activeRun(r)?"↻":"✓"}</div><div class="run-content"><strong>${esc(r.display_title||r.name||"GitHub workflow")}</strong><span>${esc(r.name||"")} · ${esc(ago(r.created_at))} · #${esc(r.run_number||r.id)}</span></div><span class="run-status ${cls}">${esc(label)}</span><span class="row-buttons">${buttons}</span></div>`;
 }
+// A phase-based (not fabricated percent) progress bar remains visible on every page.
+const lifecycleStages={
+  starting:["Requested","Runner","Loading world","Paper ready"],
+  stopping:["Requested","Saving world","Backing up","Stopped"],
+  restarting:["Requested","Saving world","Backing up","Starting","Paper ready"],
+  restoring:["Requested","Saving world","Backing up","Restoring","Paper ready"]
+};
+function observedPhase(){
+  if(state.direct&&directOnline()&&state.direct.phase)return state.direct.phase;
+  return state.cloud?.bridge?.status?.phase||"";
+}
+function operationSnapshot(){
+  const op=state.operation;
+  const main=latestServerRun();
+  const currentSession=(directOnline()?state.direct:state.cloud?.bridge?.status)?.session;
+  const ready=connectedLive() && !["saving","stopping","backing_up","stopped"].includes(observedPhase());
+  const status=main?.status;
+  if(!op){
+    const phase=observedPhase();
+    if(["saving","stopping","backing_up"].includes(phase))return {kind:"stopping",step:phase};
+    if(activeRun(main)&&!ready)return {kind:"starting",step:status==="queued"?"Requested":"Runner"};
+    return null;
+  }
+  const changedSession=currentSession && currentSession!==op.session;
+  if(op.kind==="starting"&&ready&&(!op.session||changedSession)){state.operation=null;return null;}
+  if(["restarting","restoring"].includes(op.kind)&&changedSession&&ready){state.operation=null;return null;}
+  if(op.kind==="stopping"&&!activeRun(main)&&!ready&&Date.now()-op.at>4000){state.operation=null;return null;}
+  const phase=observedPhase();
+  let step=op.step;
+  if(["saving","stopping","backing_up"].includes(phase))step=phase;
+  else if(["restarting","restoring"].includes(op.kind)&&changedSession)step=ready?"Paper ready":"Starting";
+  else if(op.kind==="starting"&&activeRun(main))step=ready?"Paper ready":"Runner";
+  else if(op.kind==="stopping"&&!ready)step=activeRun(main)?"Backing up":"Stopped";
+  return {kind:op.kind,step};
+}
+function lifecycleActive(){return Boolean(operationSnapshot())}
+function syncServerOperation(){
+  const box=$("#serverOperation");if(!box)return;
+  const current=operationSnapshot();
+  box.hidden=!current;
+  if(!current)return;
+  const kind=current.kind;
+  const title={starting:"Starting server",stopping:"Stopping server",restarting:"Restarting server",restoring:"Restoring world"}[kind]||"Server operation";
+  $("#serverOperationTitle").textContent=title;
+  const stages=lifecycleStages[kind]||lifecycleStages.starting;
+  const phase=current.step;
+  const at=phase==="saving"?1:phase==="stopping"?1:phase==="backing_up"?2:Math.max(0,stages.findIndex(s=>s.toLowerCase()===String(phase).toLowerCase()));
+  const index=Math.min(stages.length-1,Math.max(0,at));
+  $("#serverOperationStep").textContent=stages[index];
+  $("#serverOperationStages").innerHTML=stages.map((stage,i)=>'<span class="server-operation-stage '+(i<index?"complete":i===index?"current":"")+'"><i></i>'+esc(stage)+'</span>').join("");
+  const detail={
+    saving:"Paper is flushing world data and disconnecting players.",
+    stopping:"Waiting for a clean Paper exit.",
+    backing_up:"Creating and verifying the world backup.",
+    starting:"Waiting for GitHub runner and Paper readiness.",
+    restarting:"Saving the current world and starting a new session.",
+    restoring:"Restoring the selected verified snapshot."
+  }[phase]||"Waiting for the next confirmed server or workflow phase.";
+  $("#serverOperationDetail").textContent=detail;
+  $("#serverOperationSource").textContent=connectedLive()?"Paper live status":"GitHub Actions status";
+}
+function beginOperation(kind){
+  const session=(directOnline()?state.direct:state.cloud?.bridge?.status)?.session||null;
+  state.operation={kind,session,at:Date.now(),step:"Requested"};
+  syncServerOperation();
+}
+function clockDisplay(field){
+  // Stale telemetry from a previous Paper session must not tick while
+  // a restart or graceful stop is underway.
+  if(lifecycleActive()||!connectedLive()||["saving","stopping","backing_up","starting"].includes(observedPhase()))return "—";
+  return liveClock.session?duration(interpolatedPaperSeconds(field)):"—";
+}
 function drawOverview(){
   const main=latestServerRun(),live=currentPaper(),online=connectedLive();
   const github=state.github.connected;
@@ -251,8 +323,8 @@ function drawOverview(){
   const hero=`<div class="hero"><div class="hero-top"><div><div class="hero-label">SERVER STATUS</div><div class="hero-title">${esc(status)}</div></div>${statePill}</div><div class="hero-desc">${desc}</div><div class="hero-actions">${btn("▶ Start server","start-server","primary",serverRunning())} ${btn("↻ Safe restart","restart-server","",!connectedLive())} ${btn("■ Save & stop","stop-server","danger",!serverRunning()||!connectedLive())} ${main?btn("◷ View Minecraft logs","server-logs","flat"):""}</div></div>`;
   const stats=`<div class="stats">
    ${stat("Online players",online?(live.players||[]).length:"—",online?"Connected to Paper":"Live connection required","♙")}
-   ${stat("Server uptime",liveClock.session?duration(interpolatedPaperSeconds("uptime")):"—","Current runner session","◷","uptime")}
-   ${stat("Empty time",liveClock.session?duration(interpolatedPaperSeconds("emptyFor")):"—","Restart after 1 hour empty","⌛","empty")}
+   ${stat("Server uptime",clockDisplay("uptime"),"Current runner session","◷","uptime")}
+   ${stat("Empty time",clockDisplay("emptyFor"),"Restart after 1 hour empty","⌛","empty")}
    ${stat("Memory used",online&&live.memoryMiB!=null?Number(live.memoryMiB).toFixed(0)+" MB":"—","Paper Java process","▦")}
   </div>`;
   const runnerCard=main?panel("GitHub runner · independent status",`<div class="list-stat"><span>Latest Minecraft run</span><strong>#${esc(main.run_number)}</strong></div><div class="list-stat"><span>Workflow status</span><strong>${esc(main.conclusion||main.status||"unknown")}</strong></div><div class="list-stat"><span>Workflow elapsed (approx.)</span><strong data-live="runner">${runnerElapsed!==null?duration(runnerElapsed):"—"}</strong></div><p class="field-tip" style="margin-top:14px">Workflow elapsed is estimated from GitHub timestamps and may include queue time; it is not Paper uptime. Minecraft player and memory metrics require a functioning live bridge.</p><button class="btn small flat" data-action="server-logs">View GitHub job logs</button>`):"";
@@ -359,6 +431,7 @@ function render(){
   (pages[state.page]||drawOverview)();
   restoreDrafts();
   syncUpdateButton();
+  syncServerOperation();
   const pageNode=$("#content");
   // Animate navigation only; keep telemetry updates unobtrusive.
   if(state._lastAnimatedPage!==state.page){
@@ -408,6 +481,7 @@ async function refresh(quiet=false){
     }
     if(state.page==="console"&&!connectedLive()&&state.github.connected&&Date.now()-state.logFetchedAt>30000)await loadGithubServerLog(true);
     state.lastFetch=Date.now();
+    syncServerOperation();
     // A background refresh must not replace a focused text field. The next
     // refresh after typing will reconcile the visible data.
     if(!editing())render();
@@ -427,6 +501,7 @@ async function startApp(){
       state.directFetchedAt=Date.now();
       state.directError=null;
       observeLiveClock(next,state.directFetchedAt);
+      syncServerOperation();
       const changes=JSON.stringify({
         ready:previous?.ready,session:previous?.session,players:previous?.players,
         phase:previous?.phase,memoryMiB:previous?.memoryMiB
@@ -450,6 +525,7 @@ async function startApp(){
   }catch(error){state.directError=errorText(error);}
   try{await window.__TAURI__.event.listen("server-restore-progress",event=>{
     state.restoreMessage=String(event.payload?.message||"Restoring backup…");
+    syncServerOperation();
     if(state.page==="backups")render();
   });}catch{}
   await Promise.all([loadNetbirdAuto(),loadDirectPeerConfig()]);
@@ -464,7 +540,7 @@ async function action(type,id){
   case "market-restart":{
     if(!connectedLive())return flash("Server must be connected to restart safely.");
     if(!await dialog("Safely restart Paper?","Players will be kicked, the world saved and backed up, and the server restarted to load your newly installed plugins."))return;
-    try{await sendPaper("restart");flash("Safe plugin activation restart requested.");}catch{}
+    try{await sendPaper("restart");beginOperation("restarting");flash("Safe plugin activation restart requested.");}catch{}
     return;
   }
   case "server-logs":{
@@ -527,14 +603,14 @@ async function action(type,id){
     if(serverRunning())return flash("Server is already running or starting.");
     if(!state.github.connected)return flash("Connect GitHub first.");
     if(!await dialog("Start Minecraft server?","Start Paper from the latest verified world backup, including queued settings, files and Modrinth installs?"))return;
-    try{await run("github_dispatch",{workflowId:"paper-state-test.yml"});flash("Minecraft workflow requested.");setTimeout(()=>refresh(true),1500);}catch{}return;
+    try{await run("github_dispatch",{workflowId:"paper-state-test.yml"});beginOperation("starting");flash("Minecraft workflow requested.");setTimeout(()=>refresh(true),1500);}catch{}return;
   }
   case "restart-server":case "stop-server":{
     if(!serverRunning())return flash("The Minecraft server is already stopped.");
     if(!connectedLive())return flash("Safe control requires a working live bridge. Do not force-cancel the workflow or risk world data.");
     const kind=type==="restart-server"?"restart":"shutdown";
     if(!await dialog(kind==="restart"?"Safely restart Minecraft?":"Safely save and stop?","This asks the live server agent to disconnect players, save all world data and upload a verified backup before the session ends."))return;
-    try{await sendPaper(kind);flash("Safe operation requested. Check workflow for backup completion.");}catch{}return;
+    try{await sendPaper(kind);beginOperation(kind==="restart"?"restarting":"stopping");flash("Safe operation requested; progress is shown above.");}catch{}return;
   }
   case "dispatch":{
     if(!state.github.connected)return flash("Connect GitHub first.");
@@ -576,6 +652,7 @@ async function action(type,id){
       " Newer world progress will not appear in the restored world. You can still download existing backups.";
     if(!await dialog("Restore world backup?",explanation))return;
     state.restoreInProgress=true;state.restoreMessage="Preparing verified restore…";
+    beginOperation("restoring");
     render();
     try{
       await run("server_restore_backup",{runId:Number(id)});
@@ -628,7 +705,7 @@ document.addEventListener("submit",async ev=>{
 $("#refresh").addEventListener("click",()=>refresh());
 setInterval(()=>{$("#time").textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});},1000);
 // Smooth client-side counters update once per second without network traffic.
-setInterval(tickLiveUI,1000);
+setInterval(()=>{tickLiveUI();syncServerOperation()},1000);
 // Poll live telemetry independently of the expensive GitHub workflow API.
 // Cloudflare acts as fallback when NetBird is not connected.
 let livePollPending=false;
