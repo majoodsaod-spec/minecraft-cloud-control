@@ -337,6 +337,15 @@ function startupDiagnostics(){
   return panel("Startup diagnostics",'<div class="reliability-timings">'+items+'</div>'+
     '<p class="field-tip">Measured on the runner. Times depend on backup size, GitHub networking, and Paper plugin initialization.</p>');
 }
+function recoveryWarning(){
+  const run=latestServerRun();
+  if(!run||!["failure","cancelled","timed_out","action_required"].includes(run.conclusion))return "";
+  const backups=(state.overview?.artifacts||[]).filter(a=>
+    a.name==="minecraft-world"&&!a.expired);
+  if(backups.some(a=>Number(a.workflow_run?.id)===Number(run.id)))return "";
+  return notice('<strong>Recovery needs review.</strong> The latest Paper workflow ended without a verified backup. Automatic recovery will not restore an older world without confirmation. Review the runner logs or select a backup from World Backups.')+
+    '<div class="header-actions" style="margin:0 0 14px"><button class="btn small" data-action="server-logs">Review runner logs</button><button class="btn small" data-page="backups">World Backups</button></div>';
+}
 function drawOverview(){
   const main=latestServerRun(),live=currentPaper(),online=connectedLive();
   const github=state.github.connected;
@@ -362,7 +371,7 @@ function drawOverview(){
    ${panel("Recent activity",recent.length?`<div class="run-list">${recent.map(r=>runRow(r)).join("")}</div>`:boxEmpty("No runs loaded","Connect your GitHub account to see recent activity.","⎇"),`<button class="btn small flat" data-page="workflows">View all →</button>`)}
    ${panel("Connection health",`<div class="list-stat"><span>GitHub</span><strong>${github?"● Connected":"○ Not connected"}</strong></div><div class="list-stat"><span>Direct Paper · NetBird</span><strong>${directOnline()?"● Connected":"○ Not connected"}</strong></div>${!directOnline()&&state.directError?`<p class="field-tip" style="margin:10px 0 12px;color:#ae624f">Direct connection: ${esc(state.directError)}</p>`:""}<div class="list-stat"><span>Cloudflare bridge</span><strong>${state.cloud?.bridge?.status?.ready?"● Connected":"○ Offline / unavailable"}</strong></div><div class="list-stat"><span>NetBird live stream</span><strong>${state.directStreamConnected?"● Streaming":directOnline()?"◷ Polling":"○ Not connected"}</strong></div><div class="list-stat"><span>Last direct heartbeat</span><strong>${state.directFetchedAt?Math.floor((Date.now()-state.directFetchedAt)/1000)+" s ago":"—"}</strong></div><div class="list-stat"><span>Minecraft workflow</span><strong>${main?esc(main.conclusion||main.status||"unknown"):"—"}</strong></div><div class="list-stat"><span>Latest run</span><strong>${main?esc("#"+main.run_number):"—"}</strong></div><div class="list-stat"><span>World backups</span><strong>${(state.overview?.artifacts||[]).filter(a=>!a.expired).length}</strong></div><p class="field-tip" style="margin-top:18px">GitHub workflow management works without Cloudflare. Safe live commands need a working server bridge.</p>`)}
    </div>`;
-  $("#content").innerHTML=header("SERVER","Overview","Manage your server, plugins, files and backups.",btn("↻ Refresh","refresh","flat"))+hero+stats+runnerCard+startupDiagnostics()+actions;
+  $("#content").innerHTML=header("SERVER","Overview","Manage your server, plugins, files and backups.",btn("↻ Refresh","refresh","flat"))+hero+recoveryWarning()+stats+runnerCard+startupDiagnostics()+actions;
 }
 function drawWorkflows(){
   const workflows=(state.workflows||[]).filter(w=>w.state!=="deleted"),runs=state.overview?.runs||[];
