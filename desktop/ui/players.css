@@ -32,3 +32,6 @@
 .player-whitelist small{font-size:10.5px;color:#819296}
 @media(max-width:780px){.player-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.player-row{flex-wrap:wrap}.player-row-actions{width:100%;justify-content:flex-end}}
 @media(max-width:540px){.player-list-heading,.player-whitelist{align-items:stretch;flex-direction:column}.player-list-heading input{width:100%}.player-stats{gap:8px}.player-stats>div{padding:12px}}
+
+.player-whitelist-buttons{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+@media(max-width:540px){.player-whitelist-buttons{justify-content:flex-start}}
