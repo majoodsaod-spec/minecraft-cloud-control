@@ -153,6 +153,26 @@ class PlayersDirectoryTests(unittest.TestCase):
         self.assertEqual(response["whitelisted"],["JavaUser"])
         self.assertEqual(response["online"],[".BedrockA","JavaUser"])
 
+    def test_runtime_telemetry_reports_safe_bounded_metrics(self):
+        # CPU needs two samples; the first must explicitly be unavailable.
+        self.assertIsNone(self.bridge._cpu_percent())
+        for _ in range(100000):
+            pass
+        second=self.bridge._cpu_percent()
+        self.assertTrue(second is None or second>=0)
+        disk=self.bridge._disk_space()
+        self.assertIn("diskFreeMiB",disk)
+        self.assertIn("diskTotalMiB",disk)
+        if disk["diskTotalMiB"] is not None:
+            self.assertGreater(disk["diskTotalMiB"],0)
+            self.assertGreaterEqual(disk["diskFreeMiB"],0)
+            self.assertLessEqual(disk["diskFreeMiB"],disk["diskTotalMiB"])
+
+    def test_runtime_telemetry_handles_disappearing_process(self):
+        self.bridge.paper_pid=999999999
+        self.assertIsNone(self.bridge._cpu_percent())
+        self.assertIsNone(self.bridge._memory_mb())
+
     def test_java_and_bedrock_commands_use_safe_player_names(self):
         self.bridge._execute({"type":"whitelist-add","args":{"player":".BedrockA"}})
         self.bridge._execute({"type":"kick","args":{"player":"JavaUser"}})
