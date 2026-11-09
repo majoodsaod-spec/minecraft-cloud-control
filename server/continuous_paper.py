@@ -22,6 +22,7 @@ from direct_control import DirectControl
 from managed_plugins import install_managed_plugins
 from geyser_setup import configure_geyser
 from pending_files import apply_pending
+from pending_operations import apply_pending_operations
 from pending_modrinth import apply_modrinth_queue
 from reliability import LifecycleRecorder, verify_restored_world, expected_world_directory
 from contextlib import nullcontext
@@ -353,6 +354,9 @@ def main() -> None:
             restore_snapshot()
             verify_restored_world(DATA, os.environ.get("REQUIRE_RESTORE") == "true",
                                   WORK.parent / "server" / "server.properties")
+        with recorder.stage("queued_file_operations"):
+            apply_pending_operations(DATA, WORK.parent / "server" / "pending-operations.json",
+                                     WORK.parent / "server" / "pending-files.json")
         with recorder.stage("queued_file_changes"):
             apply_pending(DATA, WORK.parent / "server" / "pending-files.json")
         with recorder.stage("queued_modrinth"):
