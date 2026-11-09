@@ -20,7 +20,7 @@ import time
 import urllib.error
 import urllib.request
 
-USERNAME = re.compile(r"^[A-Za-z0-9_]{3,16}$")
+USERNAME = re.compile(r"^(?:[A-Za-z0-9_]{3,16}|\.[A-Za-z0-9_]{1,16})$")
 SAFE_PATH = re.compile(r"^[A-Za-z0-9_./ ()+@,\[\]-]+$")
 TEXT_SUFFIXES = {".txt",".json",".yml",".yaml",".properties",".conf",".cfg",".toml",".log",".md"}
 MAX_FILE = 256 * 1024
@@ -141,6 +141,37 @@ class LiveBridge:
             name=args.get("player","")
             if not isinstance(name,str) or not USERNAME.fullmatch(name):raise ValueError("Invalid player name")
             return name
+        if kind=="players-list":
+            # A read-only, privacy-minimal projection of player records.
+            # Raw UUID files and playerdata never leave the runner.
+            def names(filename):
+                record=self.data/filename
+                if not record.is_file():
+                    return []
+                if record.stat().st_size>256*1024:
+                    raise ValueError("Player record exceeds safe limit")
+                saved=json.loads(record.read_text(encoding="utf-8"))
+                if not isinstance(saved,list):
+                    raise ValueError("Invalid player record format")
+                found=set()
+                for entry in saved[:1000]:
+                    if isinstance(entry,dict):
+                        name=entry.get("name")
+                        if isinstance(name,str) and USERNAME.fullmatch(name):
+                            found.add(name)
+                return sorted(found,key=str.lower)
+            with self.lock:
+                online=sorted((x for x in self.players
+                               if isinstance(x,str) and USERNAME.fullmatch(x)),key=str.lower)
+            properties=self.data/"server.properties"
+            whitelist_enabled=None
+            if properties.is_file():
+                for line in properties.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("white-list="):
+                        whitelist_enabled=line.split("=",1)[1].strip().lower()=="true"
+            return {"online":online,"whitelisted":names("whitelist.json"),
+                    "operators":names("ops.json"),"banned":names("banned-players.json"),
+                    "whitelistEnabled":whitelist_enabled,"session":self.session}
         if kind=="console":
             cmd=args.get("command")
             if not isinstance(cmd,str) or not 0<len(cmd)<=240 or "\n" in cmd or "\r" in cmd:
