@@ -289,13 +289,17 @@ def run(jar: Path) -> None:
                 current_players = list(players)
             for player in current_players:
                 send("kick " + player + " " + message)
-            time.sleep(2)
+            # Keep a short grace period for client disconnect packets.
+            time.sleep(1)
         if pregen_active:
             send("chunky pause world")
-            time.sleep(2)
+            time.sleep(1)
+        # stdin commands are ordered. Paper's synchronous save-all flush
+        # completes before stop, and stop performs its own world save.
+        # Waiting for the process to exit is the actual durability barrier;
+        # arbitrary extra sleep here adds latency without verifying a save.
+        bridge.phase("saving","Flushing worlds and stopping Paper safely")
         send("save-all flush")
-        time.sleep(5)
-        bridge.phase("stopping","World save flushed; stopping the server")
         send("stop")
         proc.wait(timeout=90)
         if proc.returncode != 0:
