@@ -100,7 +100,7 @@ class PendingOperationsTests(unittest.TestCase):
         outside.mkdir()
         (self.data / "plugins").symlink_to(outside, target_is_directory=True)
         self.queue(op("mkdir", "plugins/config", 1))
-        with self.assertRaisesRegex(ValueError, "Symlinked"):
+        with self.assertRaisesRegex(ValueError, "Symlinked|escapes server directory"):
             apply_pending_operations(self.data, self.manifest)
         self.assertFalse((outside / "config").exists())
 
