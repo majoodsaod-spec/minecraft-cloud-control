@@ -144,6 +144,15 @@ class PlayersDirectoryTests(unittest.TestCase):
         self.assertEqual(response["known"],[])
         self.assertEqual(len(response["online"]),2)
 
+    def test_live_directory_survives_corrupt_player_record(self):
+        (self.data/"ops.json").write_text("{invalid json")
+        (self.data/"banned-players.json").write_text('"unexpected JSON shape"')
+        response=self.bridge._execute({"type":"players-list","args":{}})
+        self.assertEqual(response["operators"],[])
+        self.assertEqual(response["banned"],[])
+        self.assertEqual(response["whitelisted"],["JavaUser"])
+        self.assertEqual(response["online"],[".BedrockA","JavaUser"])
+
     def test_java_and_bedrock_commands_use_safe_player_names(self):
         self.bridge._execute({"type":"whitelist-add","args":{"player":".BedrockA"}})
         self.bridge._execute({"type":"kick","args":{"player":"JavaUser"}})
