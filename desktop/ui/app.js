@@ -254,11 +254,11 @@ function operationSnapshot(){
   const op=state.operation;
   const main=latestServerRun();
   const currentSession=(directOnline()?state.direct:state.cloud?.bridge?.status)?.session;
-  const ready=connectedLive() && !["saving","stopping","backing_up","stopped"].includes(observedPhase());
+  const ready=connectedLive() && !["shutdown_requested","saving","stopping","backing_up","stopped"].includes(observedPhase());
   const status=main?.status;
   if(!op){
     const phase=observedPhase();
-    if(["saving","stopping","backing_up"].includes(phase))return {kind:"stopping",step:phase};
+    if(["shutdown_requested","saving","stopping","backing_up"].includes(phase))return {kind:state.cloud?.bridge?.desired==="on"?"restarting":"stopping",step:phase};
     if(activeRun(main)&&!ready)return {kind:"starting",step:status==="queued"?"Requested":"Runner"};
     return null;
   }
@@ -285,7 +285,7 @@ function syncServerOperation(){
   $("#serverOperationTitle").textContent=title;
   const stages=lifecycleStages[kind]||lifecycleStages.starting;
   const phase=current.step;
-  const at=phase==="saving"?1:phase==="stopping"?1:phase==="backing_up"?2:Math.max(0,stages.findIndex(s=>s.toLowerCase()===String(phase).toLowerCase()));
+  const at=phase==="shutdown_requested"?0:phase==="saving"?1:phase==="stopping"?1:phase==="backing_up"?2:Math.max(0,stages.findIndex(s=>s.toLowerCase()===String(phase).toLowerCase()));
   const index=Math.min(stages.length-1,Math.max(0,at));
   $("#serverOperationStep").textContent=stages[index];
   $("#serverOperationStages").innerHTML=stages.map((stage,i)=>'<span class="server-operation-stage '+(i<index?"complete":i===index?"current":"")+'"><i></i>'+esc(stage)+'</span>').join("");
@@ -308,7 +308,7 @@ function beginOperation(kind){
 function clockDisplay(field){
   // Stale telemetry from a previous Paper session must not tick while
   // a restart or graceful stop is underway.
-  if(lifecycleActive()||!connectedLive()||["saving","stopping","backing_up","starting"].includes(observedPhase()))return "—";
+  if(lifecycleActive()||!connectedLive()||["shutdown_requested","saving","stopping","backing_up","starting","stopped"].includes(observedPhase()))return "—";
   return liveClock.session?duration(interpolatedPaperSeconds(field)):"—";
 }
 function drawOverview(){
