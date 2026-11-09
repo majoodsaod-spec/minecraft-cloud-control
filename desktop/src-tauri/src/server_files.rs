@@ -532,7 +532,7 @@ async fn modrinth_content_action_set(project_id:String,action:String)->Result<Va
     }
     if action=="disable"||action=="remove"{
         let (install_queue,_)=modrinth_queue_manifest().await?;
-        if install_queue.get(&project_id).is_some(){
+        if install_queue.get(project_id.as_str()).is_some(){
             return Err("Cancel the queued install/update before disabling or removing this plugin".into())
         }
     }
