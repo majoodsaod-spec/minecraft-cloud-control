@@ -6,7 +6,7 @@ const invoke=(name,args={})=>window.__TAURI__.core.invoke(name,args);
 const esc=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 const file="server/automation-policy.json";
 const days=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
-const state={config:null,sha:null,loading:false,saving:false,error:"",notice:"",loaded:false};
+const state={config:null,sha:null,loading:false,saving:false,error:"",notice:"",loaded:false,attempted:false};
 const root=()=>document.querySelector("#automation-root");
 function render(){
   const content=document.querySelector("#content");
@@ -32,11 +32,11 @@ function render(){
       Array.from({length:24},(_,i)=>'<option value="'+i+'" '+(policy.hour_utc===i?"selected":"")+'>'+String(i).padStart(2,"0")+':00</option>').join("")+'</select></label>'+
     '</div><p class="field-tip">Maintenance is attempted only in the first 15 minutes of the selected hour, and only while empty. If players are online, the window is skipped. The next verified world snapshot stores the maintenance receipt so the same week is not repeated.</p>'+
     '</section></section>';
-  if(!state.loaded&&!state.loading)load();
+  if(!state.attempted&&!state.loading)load();
 }
 async function load(){
   if(state.loading)return;
-  state.loading=true;state.error="";
+  state.loading=true;state.attempted=true;state.error="";
   try{
     const response=await invoke("github_file",{path:file});
     const parsed=JSON.parse(atob(String(response.content||"").replace(/\s/g,"")));
