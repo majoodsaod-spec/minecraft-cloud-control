@@ -56,8 +56,8 @@ function render(){
       '<p class="field-tip">Applied status is verified using receipts stored with the live server or latest backup. Removing a queue item does not reverse a change already applied.</p>';
 }
 async function reload(){
-  const ticket=++state.activeRequest;
   if(state.loading)return;
+  const ticket=++state.activeRequest;
   state.loading=true;state.error="";
   render();
   try{
