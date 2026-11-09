@@ -15,6 +15,7 @@ import binascii
 import json
 import os
 import re
+import shutil
 import threading
 import time
 import urllib.error
@@ -59,6 +60,7 @@ class LiveBridge:
         self.thread=None
         self._failures=0
         self._last_failure=""
+        self._cpu_sample=None
 
     def start(self):
         if not self.url or not self.token:
@@ -375,6 +377,34 @@ class LiveBridge:
             pass
         return None
 
+    def _cpu_percent(self):
+        """Paper CPU use, where 100% means one full logical CPU core."""
+        try:
+            raw=Path(f"/proc/{self.paper_pid}/stat").read_text(encoding="utf-8")
+            tail=raw.rsplit(")",1)[1].split()
+            ticks=int(tail[11])+int(tail[12])
+            now=time.monotonic()
+            previous=self._cpu_sample
+            self._cpu_sample=(now,ticks)
+            if previous is None or now<=previous[0] or ticks<previous[1]:
+                return None
+            hz=os.sysconf("SC_CLK_TCK")
+            if not isinstance(hz,int) or hz<=0:
+                return None
+            return round(max(0.0,(ticks-previous[1])*100.0/(hz*(now-previous[0]))),1)
+        except (OSError,ValueError,IndexError,TypeError):
+            self._cpu_sample=None
+            return None
+
+    def _disk_space(self):
+        """Runner filesystem capacity, not a claim about persistent backup storage."""
+        try:
+            usage=shutil.disk_usage(self.data)
+            return {"diskFreeMiB":round(usage.free/1048576),
+                    "diskTotalMiB":round(usage.total/1048576)}
+        except OSError:
+            return {"diskFreeMiB":None,"diskTotalMiB":None}
+
     def _loop(self):
         while not self.restart_event.is_set() and not self.shutdown_event.is_set():
             now=time.monotonic()
@@ -387,7 +417,9 @@ class LiveBridge:
             uptime=max(0,int(now-self.started))
             status={"ready":self.ready.is_set(),"players":players,"logs":logs,
                     "uptime":uptime,"restartIn":max(0,19800-uptime),
-                    "idleRestartIn":idle_remaining,"emptyFor":empty_seconds,"memoryMiB":self._memory_mb(),"memoryLimitMiB":8192,
+                    "idleRestartIn":idle_remaining,"emptyFor":empty_seconds,
+                    "memoryMiB":self._memory_mb(),"memoryLimitMiB":8192,
+                    "cpuPercent":self._cpu_percent(),**self._disk_space(),
                     "startupTimings":dict(self.startup_timings),
                     "phase":self.lifecycle_phase if self.lifecycle_phase!="starting" else ("running" if self.ready.is_set() else "starting")}
             outgoing=list(self.acked)
