@@ -81,6 +81,7 @@ class DirectControl:
                     "emptyFor": empty_for, "players": players, "logs": logs,
                     "memoryMiB": b._memory_mb(), "memoryLimitMiB": 8192,
                     "connection": "netbird",
+                    "startupTimings": dict(getattr(b, "startup_timings", {})),
                 }
 
             def stream(self):
