@@ -316,6 +316,7 @@ async fn modrinth_installed_inventory(live:bool)->Result<Value,String>{
         }
         let mut plugins=Vec::new();
         let mut datapacks=Vec::new();
+        let mut disabled=Vec::new();
         for i in 0..archive.len(){
             let entry=archive.by_index(i).map_err(|_|"Invalid archive entry")?;
             let name=entry.name();
@@ -327,8 +328,26 @@ async fn modrinth_installed_inventory(live:bool)->Result<Value,String>{
                 &&!name[16..].contains('/') {
                 datapacks.push(name[16..].to_owned());
             }
+            if name.starts_with("plugins/.disabled-modrinth/")&&name.ends_with(".jar")
+                &&!name[27..].contains('/') {
+                disabled.push(name[27..].to_owned());
+            }
         }
-        Ok(json!({"installed":installed,"pluginFiles":plugins,"datapackFiles":datapacks}))
+        if let Some(map)=installed.as_object_mut(){
+            map.retain(|id,record|{
+                let suffix=if record["kind"]=="plugin"{".jar"}else{".zip"};
+                let filename=format!("modrinth-{id}{suffix}");
+                if record["kind"]=="plugin"{
+                    if plugins.contains(&filename){record["enabled"]=json!(true);true}
+                    else if disabled.contains(&filename){record["enabled"]=json!(false);true}
+                    else{false}
+                }else if record["kind"]=="datapack"{
+                    datapacks.contains(&filename)
+                }else{false}
+            });
+        }
+        Ok(json!({"installed":installed,"pluginFiles":plugins,
+            "datapackFiles":datapacks,"disabledPluginFiles":disabled}))
     }).await.map_err(|_|"Could not read installed marketplace inventory")?
 }
 #[tauri::command]
