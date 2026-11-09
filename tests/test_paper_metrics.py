@@ -23,6 +23,12 @@ class PaperMetricsTests(unittest.TestCase):
         metrics.observe("[INFO]: MSPT from last 5s, 10s, 1m: 4.8, 5.0, 5.5")
         self.assertEqual(metrics.snapshot(),{"tps":20.0,"mspt":4.8})
 
+    def test_player_chat_cannot_spoof_performance(self):
+        metrics=PaperMetrics()
+        metrics.observe("[12:30 INFO]: <Griefer> TPS from last 1m: 0.1")
+        metrics.observe("[12:30 INFO]: <Griefer> MSPT from last 5s: 8000")
+        self.assertEqual(metrics.snapshot(),{"tps":None,"mspt":None})
+
     def test_stale_samples_are_not_presented_as_live(self):
         metrics=PaperMetrics()
         metrics.observe("[INFO]: TPS from last 1m: 18.5")
