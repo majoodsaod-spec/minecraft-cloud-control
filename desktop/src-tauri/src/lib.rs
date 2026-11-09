@@ -1161,6 +1161,7 @@ pub fn run() {
         .expect("error building Minecraft Cloud Desktop")
         .run(|app,event| {
             if let tauri::RunEvent::Exit=event {
+                cleanup_backup_cache();
                 if let Some(state)=app.try_state::<Mutex<NetbirdOwnership>>() {
                     disconnect_owned_netbird(state.inner());
                 }
