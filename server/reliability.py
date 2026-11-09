@@ -6,6 +6,7 @@ observability: failures still abort startup and cannot skip backup validation.
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
+import re
 from pathlib import Path
 import time
 
@@ -68,12 +69,35 @@ class LifecycleRecorder:
         return dict(self.report["durations"])
 
 
-def verify_restored_world(root: Path, restore_required: bool):
+WORLD_NAME = re.compile(r"^[A-Za-z0-9 _.-]{1,80}$")
+
+
+def expected_world_directory(root: Path, configured_properties: Path | None = None):
+    """Use the effective level-name, never blindly assume worlds are named 'world'."""
+    data = Path(root).resolve()
+    name = "world"
+    for path in (data / "server.properties", configured_properties):
+        if path is None or not Path(path).is_file():
+            continue
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            if line.startswith("#") or not line.startswith("level-name="):
+                continue
+            name = line.split("=", 1)[1].strip()
+    if not WORLD_NAME.fullmatch(name) or name in {".", ".."} or name.startswith("."):
+        raise RuntimeError("Invalid level-name; refusing access outside server world directory")
+    directory = (data / name).resolve()
+    if not directory.is_relative_to(data) or directory == data:
+        raise RuntimeError("World folder escapes server directory")
+    return directory
+
+
+def verify_restored_world(root: Path, restore_required: bool,
+                          configured_properties: Path | None = None):
     """Fail closed when a required world is missing after snapshot extraction."""
     if restore_required:
-        world = Path(root) / "world" / "level.dat"
+        world = expected_world_directory(root, configured_properties) / "level.dat"
         if not world.is_file() or world.is_symlink() or world.stat().st_size < 16:
-            raise RuntimeError("Required world/level.dat is missing or invalid after restore")
+            raise RuntimeError("Required world level.dat is missing or invalid after restore")
 
 
 def markdown_summary(path: Path):
