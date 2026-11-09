@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 from reliability import LifecycleRecorder, verify_restored_world, markdown_summary
 import handoff
+import recovery_gate
 
 
 class TimingsTests(unittest.TestCase):
@@ -108,6 +109,37 @@ class HandoffTests(unittest.TestCase):
         ]}
         with patch.object(handoff, "gh", return_value=(0, json.dumps(fake))):
             self.assertEqual(handoff.active_other_run("example/project", 101, "main"), 109)
+
+
+class ScheduledRecoveryTests(unittest.TestCase):
+    def test_failed_runner_after_last_snapshot_blocks_automatic_restore(self):
+        backup = [{"name": "minecraft-world", "expired": False, "workflow_run": {"id": 80},
+                   "created_at": "2026-11-09T08:00:00Z"}]
+        runs = [{"id": 90, "event": "workflow_dispatch", "status": "completed",
+                 "conclusion": "failure", "created_at": "2026-11-09T09:00:00Z"}]
+        ok, why = recovery_gate.allowed(80, backup, runs, 99)
+        self.assertFalse(ok)
+        self.assertIn("Unbacked", why)
+
+    def test_verified_latest_snapshot_allows_safe_recovery(self):
+        backup = [{"name": "minecraft-world", "expired": False, "workflow_run": {"id": 90},
+                   "created_at": "2026-11-09T10:00:00Z"}]
+        runs = [{"id": 80, "event": "workflow_dispatch", "status": "completed",
+                 "conclusion": "failure", "created_at": "2026-11-09T09:00:00Z"},
+                {"id": 90, "event": "workflow_dispatch", "status": "completed",
+                 "conclusion": "failure", "created_at": "2026-11-09T09:30:00Z"}]
+        self.assertTrue(recovery_gate.allowed(90, backup, runs, 99)[0])
+
+    def test_missing_selected_artifact_is_never_accepted(self):
+        self.assertFalse(recovery_gate.allowed(100, [], [], 101)[0])
+
+    def test_no_backup_after_prior_server_run_cannot_start_blank_world(self):
+        runs = [{"id": 85, "event": "workflow_dispatch", "conclusion": "success",
+                 "created_at": "2026-11-08T00:00:00Z"}]
+        self.assertFalse(recovery_gate.allowed(None, [], runs, 99)[0])
+
+    def test_fresh_repository_without_backup_can_start_first_world(self):
+        self.assertTrue(recovery_gate.allowed(None, [], [], 101)[0])
 
 
 if __name__ == "__main__":
