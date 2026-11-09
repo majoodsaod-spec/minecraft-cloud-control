@@ -55,6 +55,7 @@ class LiveBridge:
         self.seen=set()
         self.started=time.monotonic()
         self.lifecycle_phase="starting"
+        self.startup_timings={}
         self.thread=None
         self._failures=0
         self._last_failure=""
@@ -300,6 +301,7 @@ class LiveBridge:
             status={"ready":self.ready.is_set(),"players":players,"logs":logs,
                     "uptime":uptime,"restartIn":max(0,19800-uptime),
                     "idleRestartIn":idle_remaining,"emptyFor":empty_seconds,"memoryMiB":self._memory_mb(),"memoryLimitMiB":8192,
+                    "startupTimings":dict(self.startup_timings),
                     "phase":self.lifecycle_phase if self.lifecycle_phase!="starting" else ("running" if self.ready.is_set() else "starting")}
             outgoing=list(self.acked)
             try:
