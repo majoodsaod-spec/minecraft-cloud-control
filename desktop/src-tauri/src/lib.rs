@@ -1158,6 +1158,7 @@ pub fn run() {
             server_operations_list,server_operations_add,server_operations_remove,
             server_change_queue,server_change_receipts,
             server_files_list,server_files_read,server_settings_get,server_settings_save,
+            server_players_snapshot,
             modrinth_queue_list,modrinth_queue_add,modrinth_queue_remove,
             modrinth_installed_inventory,
             desktop_check_update,desktop_install_update,
