@@ -5,7 +5,9 @@ are applied, with strict path / content protection. Changes remain queued in
 GitHub across later sessions, so the repo overlay is a stable source of truth.
 """
 from pathlib import Path
+import hashlib
 import json
+import os
 import re
 
 TEXT={".txt",".json",".yml",".yaml",".properties",".conf",".cfg",".toml",".md"}
@@ -44,8 +46,30 @@ def apply_pending(data:Path,manifest:Path):
         if not target.is_relative_to(data.resolve()):
             raise ValueError("Staged path escapes server directory")
         verified.append((target,value))
+    # Receipts survive in verified backups, so the user can distinguish
+    # changes already applied to Paper from edits still awaiting a startup.
+    receipts_path=data/".cloud-applied-edits.json"
+    receipts={}
+    if receipts_path.is_file():
+        receipts=json.loads(receipts_path.read_text(encoding="utf-8"))
+        if not isinstance(receipts,dict) or len(receipts)>1000:
+            raise ValueError("Invalid staged file receipts")
+    changed=0
     for target,value in verified:
+        path=target.relative_to(data.resolve()).as_posix()
+        digest=hashlib.sha256(value.encode("utf-8")).hexdigest()
+        if receipts.get(path)==digest:
+            continue
         target.parent.mkdir(parents=True,exist_ok=True)
         target.write_text(value,encoding="utf-8")
-    print(f"Applied {len(verified)} staged server text file(s) from repository overlay",flush=True)
-    return len(verified)
+        receipts[path]=digest
+        changed+=1
+    if changed:
+        temp=data/".cloud-applied-edits.json.tmp"
+        try:
+            temp.write_text(json.dumps(receipts,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+            os.replace(temp,receipts_path)
+        finally:
+            temp.unlink(missing_ok=True)
+    print(f"Staged server text edits: {changed} newly applied / {len(verified)} queued",flush=True)
+    return changed
