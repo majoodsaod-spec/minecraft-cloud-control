@@ -229,6 +229,36 @@ class LiveBridge:
                     "pluginFiles":[p.name for p in (self.data/"plugins").glob("*.jar")][:250],
                     "disabledPluginFiles":[p.name for p in (self.data/"plugins"/".disabled-modrinth").glob("*.jar")][:250],
                     "datapackFiles":[p.name for p in (self.data/"world/datapacks").glob("*.zip")][:250]}
+        if kind=="players-inventory":
+            # Only expose player names: do not return stored addresses,
+            # ban reasons, credentials or raw private player data.
+            def names(filename):
+                path=self.data/filename
+                if not path.is_file() or path.stat().st_size>1024*1024:
+                    return []
+                try:
+                    values=json.loads(path.read_text(encoding="utf-8"))
+                    if not isinstance(values,list):return []
+                    return sorted({row["name"] for row in values[:2000]
+                        if isinstance(row,dict) and isinstance(row.get("name"),str)
+                        and len(row["name"])<=48})[:500]
+                except (OSError,ValueError,KeyError):
+                    return []
+            settings=self.data/"server.properties"
+            whitelist_enabled=False
+            if settings.is_file():
+                try:
+                    whitelist_enabled=any(line.strip().lower()=="white-list=true"
+                        for line in settings.read_text(encoding="utf-8").splitlines())
+                except OSError:
+                    pass
+            with self.lock:
+                online=sorted(self.players)
+            return {"online":online,"known":names("usercache.json"),
+                    "whitelisted":names("whitelist.json"),
+                    "banned":names("banned-players.json"),
+                    "operators":names("ops.json"),
+                    "whitelistEnabled":whitelist_enabled}
         if kind=="plugins-list":
             return [{"name":p.name,"bytes":p.stat().st_size} for p in (self.data/"plugins").glob("*.jar")][:100]
         if kind=="files-tree":
