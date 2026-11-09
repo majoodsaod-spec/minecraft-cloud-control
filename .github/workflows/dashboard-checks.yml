@@ -39,6 +39,11 @@ jobs:
           node --check desktop/ui/server_management.js
           node --check desktop/ui/change_queue.js
           node --test tests/test_phase2_queue.mjs
+      - name: Validate installed plugin and player management
+        run: |
+          node --check desktop/ui/marketplace.js
+          node --check desktop/ui/players.js
+          node --test tests/test_phase2_management.mjs
       - name: Check browser JavaScript syntax
         run: |
           node --check public/dashboard-live.js
