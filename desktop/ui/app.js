@@ -376,8 +376,8 @@ async function loadHistoricalMetrics(){
       const value=key=>row[key]==null?null:Number(row[key]);
       const cpu=value("cpu"),memoryMiB=value("memory"),diskFree=value("diskFree"),
             tps=value("tps"),mspt=value("mspt");
-      return {at,cpu:cpu==null?0:Math.max(0,cpu),
-        memory:memoryMiB==null?0:Math.min(100,100*memoryMiB/8192),
+      if(cpu==null||memoryMiB==null||!Number.isFinite(cpu)||!Number.isFinite(memoryMiB))return null;
+      return {at,cpu:Math.max(0,cpu),memory:Math.min(100,100*memoryMiB/8192),
         diskFree,tps,mspt};
     }).filter(Boolean);
     const current=state.metricHistory;
