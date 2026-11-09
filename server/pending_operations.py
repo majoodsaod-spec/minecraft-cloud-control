@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 import re
 
-from pending_files import safe_path
+from pending_files import safe_path, reject_world_path
 
 ID = re.compile(r"^[a-z0-9-]{12,80}$")
 SEGMENT = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]*$")
@@ -126,7 +126,8 @@ def _receipts(data: Path):
     return value
 
 
-def apply_pending_operations(data: Path, manifest: Path, edits_manifest: Path | None = None):
+def apply_pending_operations(data: Path, manifest: Path, edits_manifest: Path | None = None,
+                             configured_properties: Path | None = None):
     items = load_operations(manifest)
     if not items:
         return 0
@@ -139,6 +140,9 @@ def apply_pending_operations(data: Path, manifest: Path, edits_manifest: Path | 
     # Validate the COMPLETE queue and all target paths before making changes.
     changes = []
     for item in items:
+        reject_world_path(data, item["path"], configured_properties)
+        if item["type"] == "rename":
+            reject_world_path(data, item["target"], configured_properties)
         path = _verified_destination(data, item["path"])
         target = _verified_destination(data, item["target"]) if item["type"] == "rename" else None
         if item["type"] in {"delete", "rename"} and item["path"] in edits:
@@ -175,6 +179,9 @@ def apply_pending_operations(data: Path, manifest: Path, edits_manifest: Path | 
             elif not target.is_file():
                 raise ValueError("Queued rename source disappeared and target is missing")
         receipts[item["id"]] = receipt_key
+        # Keep receipt metadata bounded even after years of queued operations.
+        if len(receipts) > 700:
+            receipts = dict(list(receipts.items())[-500:])
         # Atomic receipt update so interrupted runner startups cannot leave
         # a partly written receipt in a future verified world snapshot.
         temp = data / (RECEIPT + ".tmp")
