@@ -235,6 +235,59 @@ async fn server_files_read(path:String,live:bool)->Result<Value,String>{
     result["artifactId"]=json!(artifact);
     Ok(result)
 }
+// Offline player management reveals names and flags only, not UUIDs or
+// playerdata. Reading requires the same verified backup as Server Files.
+fn permitted_player_name(name:&str)->bool{
+    let rest=name.strip_prefix('.').unwrap_or(name);
+    let min=if name.starts_with('.') {1}else{3};
+    rest.len()>=min&&rest.len()<=16&&rest.bytes().all(|ch|
+        ch.is_ascii_alphanumeric()||ch==b'_'
+    )
+}
+fn backup_players(snapshot:&std::path::Path)->Result<Value,String>{
+    let file=std::fs::File::open(snapshot).map_err(|_|"Cannot open verified snapshot")?;
+    let mut zip=zip::ZipArchive::new(file).map_err(|_|"Invalid verified world archive")?;
+    fn names(zip:&mut zip::ZipArchive<std::fs::File>,filename:&str)->Result<Vec<String>,String>{
+        let mut found=std::collections::BTreeSet::new();
+        if let Ok(mut entry)=zip.by_name(filename){
+            if entry.size()>256*1024{return Err("Player record exceeds safe size".into())}
+            let mut content=String::new();
+            entry.read_to_string(&mut content).map_err(|_|"Cannot decode player record")?;
+            let parsed:Value=serde_json::from_str(&content).map_err(|_|"Invalid player record")?;
+            let items=parsed.as_array().ok_or("Invalid player record format")?;
+            for item in items.iter().take(1000){
+                if let Some(name)=item["name"].as_str().filter(|name|permitted_player_name(name)){
+                    found.insert(name.to_owned());
+                }
+            }
+        }
+        Ok(found.into_iter().collect())
+    }
+    let whitelisted=names(&mut zip,"whitelist.json")?;
+    let operators=names(&mut zip,"ops.json")?;
+    let banned=names(&mut zip,"banned-players.json")?;
+    let mut whitelist_enabled=Value::Null;
+    if let Ok(mut entry)=zip.by_name("server.properties"){
+        if entry.size()<=256*1024{
+            let mut content=String::new();
+            if entry.read_to_string(&mut content).is_ok(){
+                for line in content.lines(){
+                    if let Some(v)=line.strip_prefix("white-list="){
+                        whitelist_enabled=json!(v.trim().eq_ignore_ascii_case("true"));
+                    }
+                }
+            }
+        }
+    }
+    Ok(json!({"online":[],"whitelisted":whitelisted,"operators":operators,
+        "banned":banned,"whitelistEnabled":whitelist_enabled,"session":null,"source":"backup"}))
+}
+#[tauri::command]
+async fn server_players_snapshot()->Result<Value,String>{
+    let (_,snapshot)=verified_backup().await?;
+    tokio::task::spawn_blocking(move||backup_players(snapshot.as_path()))
+        .await.map_err(|_|"Cannot inspect verified backup player directory")?
+}
 // Offline inventory comes from the last SHA-256-verified world backup, never
 // guessed from the current Windows app session.
 #[tauri::command]
