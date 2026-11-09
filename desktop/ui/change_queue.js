@@ -104,6 +104,7 @@ async function remove(kind,id){
     state.loaded=false;
     await reload();
     window.ServerManager?.refreshPending?.();
+    window.McMarketplace?.refreshQueueState?.();
   }catch(error){
     state.error="Could not remove queued change: "+String(error).slice(0,200);render();
   }
