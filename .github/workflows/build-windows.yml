@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 55
     steps:
       - name: Check out desktop source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
       - name: Cache Rust dependencies
