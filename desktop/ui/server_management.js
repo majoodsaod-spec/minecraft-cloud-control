@@ -154,6 +154,101 @@ async function discard(){
    const list=document.querySelector("#server-files-list");if(list)list.innerHTML=rows();
  }catch(e){note(String(e),true)}
 }
+const allowedText=/\.(txt|json|yml|yaml|properties|conf|cfg|toml|md)$/i;
+const safeFileName=/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,90}$/;
+function relativeFile(name){return (state.dir?state.dir+"/":"")+name;}
+function currentlyListed(name){return (state.listing?.entries||[]).some(e=>e.name===name);}
+async function stageFolder(){
+ const name=window.prompt("Folder name (created at the next Paper startup):");
+ if(name===null)return;
+ if(!safeFileName.test(name)||name==="."||name===".."){
+  return note("Enter a simple folder name with letters, numbers, dashes or underscores.",true);
+ }
+ if(currentlyListed(name))return note("A file or folder already has that name.",true);
+ const path=relativeFile(name);
+ try{
+  await invoke("server_operations_add",{kind:"mkdir",path,target:null});
+  note("Folder creation queued for the next Paper startup.");
+  window.ChangeQueue?.reload?.();
+ }catch(error){note(String(error),true)}
+}
+async function stageNewFile(){
+ const name=window.prompt("New UTF-8 text filename (example: config.yml):");
+ if(name===null)return;
+ if(!safeFileName.test(name)||!allowedText.test(name)){
+  return note("Only supported text filenames can be queued.",true);
+ }
+ if(currentlyListed(name))return note("That file exists. Select it to queue an edit.",true);
+ const path=relativeFile(name);
+ try{
+  await invoke("server_files_stage",{path,content:""});
+  state.pending[path]="";
+  note("New text file queued for the next Paper startup.");
+  window.ChangeQueue?.reload?.();
+ }catch(error){note(String(error),true)}
+}
+async function stageRename(){
+ if(!state.selected||state.selected.unsupported)return;
+ const source=state.selected.path;
+ const name=window.prompt("New filename for "+source+":",source.split("/").at(-1));
+ if(name===null)return;
+ if(!safeFileName.test(name)||!allowedText.test(name)){
+  return note("The new name must be a safe text filename.",true);
+ }
+ const path=relativeFile(name);
+ if(path===source)return;
+ if(currentlyListed(name))return note("The destination name already exists.",true);
+ if(!window.confirm("Queue rename?\n"+source+"\n→ "+path+
+   "\n\nThe running server is not modified. This applies at a later startup."))return;
+ try{
+  await invoke("server_operations_add",{kind:"rename",path:source,target:path});
+  note("Rename queued for the next Paper startup.");
+  window.ChangeQueue?.reload?.();
+ }catch(error){note(String(error),true)}
+}
+async function stageDelete(){
+ if(!state.selected||state.selected.unsupported)return;
+ const path=state.selected.path;
+ if(!window.confirm("Queue deletion of "+path+"?\n\n"+
+    "This removes the text file on a future startup. The latest verified backup stays unchanged. "+
+    "You can cancel the queued deletion before restarting."))return;
+ try{
+  await invoke("server_operations_add",{kind:"delete",path,target:null});
+  note("Deletion queued for the next Paper startup.");
+  window.ChangeQueue?.reload?.();
+ }catch(error){note(String(error),true)}
+}
+async function uploadTextFiles(files){
+ if(!files.length)return;
+ if(files.length>10)return note("Upload up to 10 text files at a time.",true);
+ if(!window.confirm("Queue "+files.length+" local text file(s) for the next Paper startup? "+
+    "The current server and latest verified backup will not be changed."))return;
+ const decoder=new TextDecoder("utf-8",{fatal:true});
+ let done=0;let failure="";
+ for(const file of files){
+  try{
+   if(!safeFileName.test(file.name)||!allowedText.test(file.name))throw Error("Unsupported filename");
+   if(file.size>131072)throw Error("Text file exceeds 128 KiB");
+   if(currentlyListed(file.name))throw Error("Already exists; open the file to edit");
+   const content=decoder.decode(await file.arrayBuffer());
+   if(content.includes("\0"))throw Error("Binary files cannot be queued as text");
+   const path=relativeFile(file.name);
+   await invoke("server_files_stage",{path,content});
+   state.pending[path]=content;
+   done++;
+  }catch(error){failure+=file.name+": "+String(error).slice(0,100)+"; ";}
+ }
+ note(done+" file(s) queued."+(failure?" Not queued: "+failure:""),Boolean(failure));
+ if(done)window.ChangeQueue?.reload?.();
+}
+async function refreshPending(){
+ await loadPending();
+ const listing=document.querySelector("#server-files-list");
+ if(listing)listing.innerHTML=rows();
+ const preview=document.querySelector("#server-file-preview");
+ if(preview)preview.innerHTML=fileActions();
+}
+
 const groups=["Players & Access","Gameplay","Performance","Networking","Other"];
 function settingsControl(key,value){
  const group=categoryOf(key);
