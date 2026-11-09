@@ -18,6 +18,46 @@ PLUGIN_LOADERS={"paper","purpur","spigot","bukkit"}
 MAX_SIZE=55*1024*1024
 MC_VERSION="26.3"
 
+# Metadata lives beside the JARs and survives verified world snapshots.
+REGISTRY=".modrinth-installed.json"
+def installed_inventory(data:Path):
+    found={}
+    path=data/"plugins"/REGISTRY
+    if path.is_file():
+        try:
+            saved=json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(saved,dict):
+                for project,entry in saved.items():
+                    if not isinstance(entry,dict) or not IDENT.fullmatch(project):
+                        continue
+                    kind=entry.get("kind")
+                    disk=(data/"plugins" if kind=="plugin" else data/"world/datapacks")
+                    suffix=".jar" if kind=="plugin" else ".zip"
+                    if kind in ("plugin","datapack") and (disk/("modrinth-"+project+suffix)).is_file():
+                        found[project]=entry
+        except (ValueError,OSError):
+            pass
+    for kind,folder,suffix in (("plugin",data/"plugins",".jar"),("datapack",data/"world/datapacks",".zip")):
+        if folder.is_dir():
+            for file in folder.glob("modrinth-*"+suffix):
+                project=file.name[len("modrinth-"):-len(suffix)]
+                if IDENT.fullmatch(project) and project not in found:
+                    found[project]={"kind":kind,"versionId":None,"version":"Unknown","title":project}
+    return found
+
+def save_installed(data:Path,project_id:str,version_id:str,kind:str,title:str,version:str):
+    folder=data/"plugins"
+    folder.mkdir(parents=True,exist_ok=True)
+    dest=folder/REGISTRY
+    registry=installed_inventory(data)
+    registry[project_id]={"kind":kind,"versionId":version_id,"version":version,"title":title}
+    temporary=folder/(REGISTRY+".tmp")
+    try:
+        temporary.write_text(json.dumps(registry,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+        temporary.replace(dest)
+    finally:
+        temporary.unlink(missing_ok=True)
+
 def get_json(url):
     request=urllib.request.Request(url,headers={"User-Agent":UA,"Accept":"application/json"})
     with urllib.request.urlopen(request,timeout=20) as response:
@@ -78,7 +118,8 @@ def install_modrinth(data:Path, project_id:str, version_id:str, kind:str):
             for part in iter(lambda:source.read(1024*128),b""):
                 existing.update(part)
         if existing.hexdigest()==expected:
-            return {"name":project.get("title",project_id),"file":str(target.relative_to(data)),
+            save_installed(data,project_id,version_id,kind,project.get("title",project_id),version.get("version_number",""))
+            return {"name":project.get("title",project_id),"projectId":project_id,"versionId":version_id,"file":str(target.relative_to(data)),
                     "version":version.get("version_number",""),"kind":kind,
                     "restartRequired":kind=="plugin","installed":True,"alreadyInstalled":True}
     temporary=target_dir/(name+".download")
@@ -107,8 +148,9 @@ def install_modrinth(data:Path, project_id:str, version_id:str, kind:str):
         except BadZipFile:
             raise ValueError("Downloaded file is not a valid archive")
         temporary.replace(target)
+        save_installed(data,project_id,version_id,kind,project.get("title",project_id),version.get("version_number",""))
     finally:
         temporary.unlink(missing_ok=True)
-    return {"name":project.get("title",project_id),"file":str(target.relative_to(data)),
+    return {"name":project.get("title",project_id),"projectId":project_id,"versionId":version_id,"file":str(target.relative_to(data)),
             "version":version.get("version_number",""),"kind":kind,
             "restartRequired":kind=="plugin","installed":True}
