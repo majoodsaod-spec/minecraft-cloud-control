@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from collections import deque
 import hashlib
 import json
@@ -19,6 +20,7 @@ import zipfile
 from paper_lifecycle import DATA, OUTPUT, PREV, WORK, CONFIG, SKIP_NAMES, SKIP_FILES, digest, download_paper
 from runtime_bridge import LiveBridge
 from paper_metrics import PaperMetrics
+from weekly_maintenance import read_policy, due as weekly_due, last_completed, mark_completed
 from direct_control import DirectControl
 from managed_plugins import install_managed_plugins
 from geyser_setup import configure_geyser
@@ -224,6 +226,9 @@ def run(jar: Path, recorder: LifecycleRecorder | None = None) -> None:
             observed["empty_since"] = None if players else started
         warned = set()
         next_tick_sample = 0.0
+        weekly_policy = read_policy(WORK.parent / "server" / "automation-policy.json")
+        weekly_last = last_completed(DATA)
+        weekly_attempted = False
         # Pregenerate a modest starter area only while no players are online.
         # Chunky saves its own task progress across verified world snapshots.
         chunky_available = (DATA / "plugins" / "Chunky.jar").is_file()
@@ -259,6 +264,28 @@ def run(jar: Path, recorder: LifecycleRecorder | None = None) -> None:
                 empty_since = observed["empty_since"]
                 online_count = len(players)
             empty_for = max(0, now - empty_since) if not online_count and empty_since is not None else 0
+            if not weekly_attempted and weekly_due(weekly_policy,datetime.now(timezone.utc),
+                                                   online_count,weekly_last):
+                weekly_attempted=True
+                send("say Weekly maintenance is scheduled in 15 seconds unless someone joins.")
+                canceled=False
+                for _ in range(15):
+                    if STOPPED.is_set() or bridge_shutdown.is_set() or bridge_restart.is_set():
+                        canceled=True
+                        break
+                    time.sleep(1)
+                    with lock:
+                        if players:
+                            canceled=True
+                            break
+                if canceled:
+                    print("Weekly maintenance postponed to avoid disrupting an active player or shutdown",flush=True)
+                else:
+                    # Persist the once-per-week receipt in the verified world
+                    # snapshot, never in a separate unbacked GitHub variable.
+                    mark_completed(DATA,datetime.now(timezone.utc))
+                    print("Weekly maintenance window: beginning safe save and backup",flush=True)
+                    break
             if chunky_available and chunky_radius:
                 if pregen_active and online_count:
                     send("chunky pause world")
