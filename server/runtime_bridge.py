@@ -238,11 +238,14 @@ class LiveBridge:
                     return []
                 try:
                     values=json.loads(path.read_text(encoding="utf-8"))
-                    if not isinstance(values,list):return []
-                    return sorted({row["name"] for row in values[:2000]
-                        if isinstance(row,dict) and isinstance(row.get("name"),str)
-                        and len(row["name"])<=48})[:500]
-                except (OSError,ValueError,KeyError):
+                    if not isinstance(values,list):
+                        return []
+                    return sorted({name for row in values[:2000]
+                        if isinstance(row,dict)
+                        for name in [row.get("name")]
+                        if isinstance(name,str) and USERNAME.fullmatch(name)},
+                        key=str.lower)[:500]
+                except (OSError,ValueError,UnicodeError):
                     return []
             settings=self.data/"server.properties"
             whitelist_enabled=False
@@ -253,7 +256,9 @@ class LiveBridge:
                 except OSError:
                     pass
             with self.lock:
-                online=sorted(self.players)
+                online=sorted((name for name in self.players
+                               if isinstance(name,str) and USERNAME.fullmatch(name)),
+                              key=str.lower)
             return {"online":online,"known":names("usercache.json"),
                     "whitelisted":names("whitelist.json"),
                     "banned":names("banned-players.json"),
