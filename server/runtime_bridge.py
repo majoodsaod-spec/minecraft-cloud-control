@@ -6,9 +6,9 @@ Never includes the bridge token in console output.
 from __future__ import annotations
 from collections import deque
 try:
-    from .modrinth_install import install_modrinth
+    from .modrinth_install import install_modrinth, installed_inventory
 except ImportError:  # Launched as python server/continuous_paper.py
-    from modrinth_install import install_modrinth
+    from modrinth_install import install_modrinth, installed_inventory
 from pathlib import Path
 import base64
 import binascii
@@ -175,6 +175,10 @@ class LiveBridge:
                 self.send("minecraft:reload")
                 result["reloadRequested"]=True
             return result
+        if kind=="marketplace-inventory":
+            return {"installed":installed_inventory(self.data),
+                    "pluginFiles":[p.name for p in (self.data/"plugins").glob("*.jar")][:250],
+                    "datapackFiles":[p.name for p in (self.data/"world/datapacks").glob("*.zip")][:250]}
         if kind=="plugins-list":
             return [{"name":p.name,"bytes":p.stat().st_size} for p in (self.data/"plugins").glob("*.jar")][:100]
         if kind=="files-tree":
