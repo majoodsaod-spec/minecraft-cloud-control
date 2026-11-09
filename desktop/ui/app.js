@@ -499,7 +499,11 @@ async function loadWorlds(force=false){
     state.worldsSession=session;
   }catch(error){
     state.worldsError=errorText(error);
+    state.worlds=null;
   }finally{
+    // Cache failures briefly too, so a failed connection cannot cause an
+    // endless fetch-render-fetch loop on the Backups page.
+    state.worldsSession=session;
     state.worldsFetchedAt=Date.now();
     state.worldsLoading=false;
     if(state.page==="backups"&&!editing())render();
