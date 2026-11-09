@@ -24,6 +24,7 @@ from geyser_setup import configure_geyser
 from pending_files import apply_pending
 from pending_operations import apply_pending_operations
 from pending_modrinth import apply_modrinth_queue
+from pending_content_actions import apply_content_actions
 from reliability import LifecycleRecorder, verify_restored_world, expected_world_directory
 from contextlib import nullcontext
 
@@ -362,7 +363,10 @@ def main() -> None:
             apply_pending(DATA, WORK.parent / "server" / "pending-files.json",
                           WORK.parent / "server" / "server.properties")
         with recorder.stage("queued_modrinth"):
-            apply_modrinth_queue(DATA, WORK.parent / "server" / "pending-modrinth.json")
+            apply_modrinth_queue(DATA, WORK.parent / "server" / "pending-modrinth.json",
+                                 WORK.parent / "server" / "pending-content-actions.json")
+        with recorder.stage("queued_content_actions"):
+            apply_content_actions(DATA, WORK.parent / "server" / "pending-content-actions.json")
         config = json.loads(CONFIG.read_text())
         with recorder.stage("paper_download"):
             jar = download_paper(config["minecraft_version"])
