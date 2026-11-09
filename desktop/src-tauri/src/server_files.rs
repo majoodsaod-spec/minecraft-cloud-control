@@ -228,6 +228,49 @@ async fn server_files_read(path:String,live:bool)->Result<Value,String>{
     result["artifactId"]=json!(artifact);
     Ok(result)
 }
+// Offline inventory comes from the last SHA-256-verified world backup, never
+// guessed from the current Windows app session.
+#[tauri::command]
+async fn modrinth_installed_inventory(live:bool)->Result<Value,String>{
+    if live {
+        let response=direct_request("command",
+            Some(json!({"type":"marketplace-inventory","args":{}}))).await?;
+        if response["ok"]!=true{return Err("Runner could not inspect installed plugins".into())}
+        return Ok(response["result"].clone())
+    }
+    let (_,snapshot)=verified_backup().await?;
+    tokio::task::spawn_blocking(move||->Result<Value,String>{
+        let file=std::fs::File::open(snapshot.as_ref())
+            .map_err(|_|"Cannot open verified world backup")?;
+        let mut archive=zip::ZipArchive::new(file).map_err(|_|"Invalid world backup ZIP")?;
+        let mut installed=json!({});
+        if let Ok(mut entry)=archive.by_name("plugins/.modrinth-installed.json"){
+            if entry.size()<=128*1024{
+                let mut content=String::new();
+                if entry.read_to_string(&mut content).is_ok(){
+                    if let Ok(map)=serde_json::from_str::<Value>(&content){
+                        if map.is_object(){installed=map;}
+                    }
+                }
+            }
+        }
+        let mut plugins=Vec::new();
+        let mut datapacks=Vec::new();
+        for i in 0..archive.len(){
+            let entry=archive.by_index(i).map_err(|_|"Invalid archive entry")?;
+            let name=entry.name();
+            if name.starts_with("plugins/")&&name.ends_with(".jar")
+                &&!name[8..].contains('/') {
+                plugins.push(name[8..].to_owned());
+            }
+            if name.starts_with("world/datapacks/")&&name.ends_with(".zip")
+                &&!name[16..].contains('/') {
+                datapacks.push(name[16..].to_owned());
+            }
+        }
+        Ok(json!({"installed":installed,"pluginFiles":plugins,"datapackFiles":datapacks}))
+    }).await.map_err(|_|"Could not read installed marketplace inventory")?
+}
 #[tauri::command]
 async fn server_settings_get()->Result<Value,String>{
     let file=github("/contents/server/server.properties?ref=main",reqwest::Method::GET,None).await?;
