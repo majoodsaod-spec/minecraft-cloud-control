@@ -142,7 +142,7 @@ async function perform(command,player){
   }catch(error){state.error="Command failed: "+String(error).slice(0,200);}
   finally{state.acting=false;if(root())render();}
 }
-document.addEventListener("click",e=>{
+document.addEventListener("click",async e=>{
   const button=e.target.closest("[data-player-action]");
   if(!button||!root())return;
   e.preventDefault();
