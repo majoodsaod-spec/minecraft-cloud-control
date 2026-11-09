@@ -33,8 +33,11 @@ def installed_inventory(data:Path):
                     kind=entry.get("kind")
                     disk=(data/"plugins" if kind=="plugin" else data/"world/datapacks")
                     suffix=".jar" if kind=="plugin" else ".zip"
-                    if kind in ("plugin","datapack") and (disk/("modrinth-"+project+suffix)).is_file():
-                        found[project]=entry
+                    disabled=(data/"plugins"/".disabled-modrinth"/("modrinth-"+project+".jar"))
+                    active=(disk/("modrinth-"+project+suffix)).is_file()
+                    inactive=kind=="plugin" and disabled.is_file()
+                    if kind in ("plugin","datapack") and (active or inactive):
+                        found[project]={**entry,"enabled":bool(active)}
         except (ValueError,OSError):
             pass
     for kind,folder,suffix in (("plugin",data/"plugins",".jar"),("datapack",data/"world/datapacks",".zip")):
@@ -42,7 +45,7 @@ def installed_inventory(data:Path):
             for file in folder.glob("modrinth-*"+suffix):
                 project=file.name[len("modrinth-"):-len(suffix)]
                 if IDENT.fullmatch(project) and project not in found:
-                    found[project]={"kind":kind,"versionId":None,"version":"Unknown","title":project}
+                    found[project]={"kind":kind,"versionId":None,"version":"Unknown","title":project,"enabled":True}
     return found
 
 def save_installed(data:Path,project_id:str,version_id:str,kind:str,title:str,version:str):
@@ -50,7 +53,7 @@ def save_installed(data:Path,project_id:str,version_id:str,kind:str,title:str,ve
     folder.mkdir(parents=True,exist_ok=True)
     dest=folder/REGISTRY
     registry=installed_inventory(data)
-    registry[project_id]={"kind":kind,"versionId":version_id,"version":version,"title":title}
+    registry[project_id]={"kind":kind,"versionId":version_id,"version":version,"title":title,"enabled":True}
     temporary=folder/(REGISTRY+".tmp")
     try:
         temporary.write_text(json.dumps(registry,indent=2,sort_keys=True)+"\n",encoding="utf-8")
