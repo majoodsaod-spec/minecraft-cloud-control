@@ -9,7 +9,7 @@ const duration=s=>{s=Math.max(0,Math.floor(Number(s)||0));return [Math.floor(s/3
 const activeRun=r=>["in_progress","queued","waiting","requested","pending"].includes(r?.status);
 const isServer=r=>(r?.name||"").includes("Continuous Paper Minecraft Server")||(r?.path||"").includes("paper-state-test.yml");
 const serverRunning=()=>connectedLive()||activeRun(latestServerRun());
-const state={operation:null,restoreInProgress:false,restoreMessage:"",page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,directStreamConnected:false,cloudFetchedAt:0,netbirdAuto:null,directPeerConfig:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null),metricHistory:[],metricSession:null,metricAt:0};
+const state={operation:null,restoreInProgress:false,restoreMessage:"",page:"overview",github:{connected:false},overview:null,cloud:null,cloudError:null,direct:null,directError:null,directFetchedAt:0,directStreamConnected:false,cloudFetchedAt:0,netbirdAuto:null,directPeerConfig:null,workflows:null,runs:null,file:null,filePath:"server/server.properties",fileDirty:false,lastFetch:0,busy:false,toastTimer:null,githubLog:null,githubLogInfo:null,githubLogError:null,logBusy:false,logFetchedAt:0,update:null,updateChecking:false,drafts:Object.create(null),metricHistory:[],metricSession:null,metricAt:0,metricHistoryLoadedSession:null,metricHistoryBusy:false};
 function flash(text){const box=$("#toast");box.textContent=text;box.classList.add("show");clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>box.classList.remove("show"),4300)}
 function btn(label,action="refresh",cls="",disabled=false){return `<button class="btn ${cls}" data-action="${action}" ${disabled?"disabled":""}>${label}</button>`}
 function boxEmpty(title,body,icon="◇"){return `<div class="empty"><div class="empty-icon">${icon}</div><h3>${title}</h3><p>${body}</p></div>`}
@@ -219,7 +219,7 @@ async function loadDirect(quiet=true){
   if(state.directStreamConnected)return;
   if(pendingDirectStatus)return pendingDirectStatus;
   pendingDirectStatus=(async()=>{
-    try{state.direct=await run("direct_status",{}, {quiet});state.directFetchedAt=Date.now();state.directError=null;recordMetric(state.direct);observeLiveClock(state.direct,state.directFetchedAt);}
+    try{state.direct=await run("direct_status",{}, {quiet});state.directFetchedAt=Date.now();state.directError=null;recordMetric(state.direct);observeLiveClock(state.direct,state.directFetchedAt);if(directOnline())loadHistoricalMetrics();}
     catch(err){state.directError=errorText(err);state.directStreamConnected=false;}
   })();
   try{return await pendingDirectStatus;}
@@ -352,7 +352,7 @@ function recordMetric(snapshot){
   if(!Number.isFinite(cpu)||!Number.isFinite(memory)||!Number.isFinite(limit)||limit<=0)return;
   const now=Date.now();
   if(state.metricSession!==snapshot.session){
-    state.metricSession=snapshot.session;state.metricHistory=[];state.metricAt=0;
+    state.metricSession=snapshot.session;state.metricAt=0;
   }
   if(now-state.metricAt<5000)return;
   state.metricAt=now;
@@ -361,6 +361,32 @@ function recordMetric(snapshot){
     tps:snapshot.tps==null?null:Number(snapshot.tps),
     mspt:snapshot.mspt==null?null:Number(snapshot.mspt)});
   if(state.metricHistory.length>120)state.metricHistory.shift();
+}
+async function loadHistoricalMetrics(){
+  if(!directOnline()||state.metricHistoryBusy)return;
+  const session=state.direct?.session;
+  if(!session||session===state.metricHistoryLoadedSession)return;
+  state.metricHistoryBusy=true;
+  try{
+    const response=await invoke("direct_command",{kind:"performance-history",args:{}});
+    if(!response?.ok||!Array.isArray(response.result))return;
+    const saved=response.result.slice(-240).map(row=>{
+      const at=Number(row?.at)*1000;
+      if(!Number.isFinite(at)||at<=0)return null;
+      const value=key=>row[key]==null?null:Number(row[key]);
+      const cpu=value("cpu"),memoryMiB=value("memory"),diskFree=value("diskFree"),
+            tps=value("tps"),mspt=value("mspt");
+      return {at,cpu:cpu==null?0:Math.max(0,cpu),
+        memory:memoryMiB==null?0:Math.min(100,100*memoryMiB/8192),
+        diskFree,tps,mspt};
+    }).filter(Boolean);
+    const current=state.metricHistory;
+    state.metricHistory=[...saved,...current].sort((a,b)=>a.at-b.at).slice(-120);
+    state.metricHistoryLoadedSession=session;
+    if(state.page==="overview"&&!editing())render();
+  }catch{
+    // History is optional. Never block a healthy direct console connection.
+  }finally{state.metricHistoryBusy=false;}
 }
 function resourceHistory(){
   const points=state.metricHistory;
@@ -383,7 +409,7 @@ function resourceHistory(){
       <path d="${line("cpu",400)}" fill="none" stroke="#16886b" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
       <path d="${line("memory",100)}" fill="none" stroke="#6e85c6" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
     </svg><div class="list-stat"><span>Resource check</span><strong>${esc(pressure)}</strong></div>
-    <p class="field-tip">Up to ten minutes of readings in this app session; CPU may exceed 100% on multicore runners. Disk readings describe temporary runner space, not stored world backups.</p>`);
+    <p class="field-tip">Recent live samples and up to two hours of saved history; CPU may exceed 100% on multicore runners. Disk readings describe temporary runner space, not stored world backups.</p>`);
 }
 function drawOverview(){
   const main=latestServerRun(),live=currentPaper(),online=connectedLive();
@@ -584,6 +610,7 @@ async function startApp(){
       state.directFetchedAt=Date.now();
       state.directError=null;
       recordMetric(next);
+      loadHistoricalMetrics();
       observeLiveClock(next,state.directFetchedAt);
       syncServerOperation();
       const changes=JSON.stringify({
