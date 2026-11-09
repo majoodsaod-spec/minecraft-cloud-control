@@ -76,6 +76,18 @@ test("Players page is interactive but requires authorized direct Paper control",
   assert.match(bridge,/def names\(filename\)/);
 });
 
+test("Whitelist controls require explicit confirmation and authenticated direct Paper",()=>{
+  assert.match(players,/data-player-action="whitelist-toggle"/);
+  assert.match(players,/state\.live/);
+  assert.match(players,/window\.confirm/);
+  assert.match(players,/kind:desired\?"whitelist-on":"whitelist-off"/);
+  assert.match(players,/Refresh player records to verify/);
+});
+test("Managed plugin changes cannot conflict with a queued install",()=>{
+  assert.match(source,/Cancel the queued install\/update before disabling or removing/);
+  assert.match(source,/if action=="disable"\|\|action=="remove"/);
+  assert.match(source,/modrinth_queue_manifest\(\)\.await/);
+});
 test("Players page does not expose dangerous raw user JSON",()=>{
   assert.doesNotMatch(players,/usercache\.json|playerdata\/|UUID-MUST/);
   assert.match(source,/fn permitted_player_name/);
