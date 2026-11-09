@@ -222,10 +222,12 @@ class LiveBridge:
                     return {}
             return {"operations":receipt(".cloud-applied-ops.json"),
                     "edits":receipt(".cloud-applied-edits.json"),
+                    "content":receipt(".cloud-applied-content.json"),
                     "installed":installed_inventory(self.data)}
         if kind=="marketplace-inventory":
             return {"installed":installed_inventory(self.data),
                     "pluginFiles":[p.name for p in (self.data/"plugins").glob("*.jar")][:250],
+                    "disabledPluginFiles":[p.name for p in (self.data/"plugins"/".disabled-modrinth").glob("*.jar")][:250],
                     "datapackFiles":[p.name for p in (self.data/"world/datapacks").glob("*.zip")][:250]}
         if kind=="plugins-list":
             return [{"name":p.name,"bytes":p.stat().st_size} for p in (self.data/"plugins").glob("*.jar")][:100]
