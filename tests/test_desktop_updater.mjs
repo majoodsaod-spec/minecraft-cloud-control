@@ -271,3 +271,14 @@ test("Marketplace supports removing queued cards and installed version compariso
   assert.match(serverRust,/async fn modrinth_installed_inventory\(live:bool\)/);
   assert.match(rust,/modrinth_installed_inventory/);
 });
+
+
+test("Phase 1 reliability surfaces measured timings and safe recovery warnings",()=>{
+  assert.match(ui,/function startupDiagnostics\(\)/);
+  assert.match(ui,/function recoveryWarning\(\)/);
+  assert.match(ui,/startupTimings/);
+  assert.match(ui,/Recovery needs review/);
+  assert.match(ui,/Verified backup/);
+  assert.match(ui,/Last direct heartbeat/);
+  assert.match(ui,/NetBird live stream/);
+});
