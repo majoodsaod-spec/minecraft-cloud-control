@@ -32,6 +32,8 @@
     sort: "downloads", page: 0, total: 0, hits: [], loading: false,
     loaded: false, installing: "", notice: "", error: false, installed: [],
     queued: {}, queueLoaded: false, queueBusy: false,
+    inventory: {installed:{},pluginFiles:[],datapackFiles:[]}, inventoryLoaded:false,inventoryBusy:false,
+    inventoryLive:null,latestReleases:{},
     sortTouched: false,
     online: false, epoch: 0, searchTimer: null
   };
@@ -63,10 +65,29 @@
     const other = item.categories && item.categories.filter(c => loaders.includes(c)).slice(0, 2) || [];
     const loaderTags = other.map(cat => '<span class="mc-discover-loader">' + escape(pretty(cat)) + '</span>').join("");
     const installing = state.installing === item.project_id;
-    const installed = state.installed.some(x => x.projectId === item.project_id);
-    const disabled = Boolean(state.installing) || state.version !== "26.3";
-    const queued = Boolean(state.queued[item.project_id]);
-    const buttonLabel = installing ? "Processing…" : !state.online ? (queued ? "Update queue" : "Queue install") : (installed ? "Reinstall" : "Install");
+    const record = state.inventory.installed?.[item.project_id] ||
+      state.installed.find(x=>x.projectId===item.project_id);
+    const files=state.kind==="plugin"?state.inventory.pluginFiles:state.inventory.datapackFiles;
+    const normalized=value=>String(value||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+    const titleStem=normalized(item.slug||item.title);
+    const suffix=state.kind==="plugin"?".jar":".zip";
+    const unmanaged=!record && Array.isArray(files) && files.some(file=>{
+      if(!String(file).endsWith(suffix))return false;
+      const stem=normalized(String(file).slice(0,-suffix.length));
+      return stem===titleStem || stem===normalized(item.title);
+    });
+    const latest=state.latestReleases[item.project_id];
+    const queued=state.queued[item.project_id];
+    const same=record&&latest&&record.versionId===latest.id;
+    const hasKnown=Boolean(record?.versionId);
+    const checking=Boolean(record?.versionId)&&!latest;
+    const current=Boolean(same||unmanaged||record&&!hasKnown);
+    const disabled = Boolean(state.installing) || state.version !== "26.3" ||
+      Boolean(current&&!queued) || Boolean(checking&&!queued);
+    const buttonLabel = installing?"Processing…" : queued?"Queued" :
+      current?"Installed" : checking?"Checking…" :
+      record && hasKnown ? (state.online?"Update":"Queue update") :
+      state.online?"Install":"Queue install";
     return '<article class="mc-discover-card">' +
       '<div class="mc-discover-art">' + icon + '</div>' +
       '<div class="mc-discover-card-main"><div class="mc-discover-title">' +
@@ -79,8 +100,10 @@
       '<span title="Downloads">↓ ' + compact(item.downloads) + '</span>' +
       '<span title="Followers">♡ ' + compact(item.follows) + '</span>' +
       '<span class="mc-discover-date" title="Last updated">◷ ' + escape(dateAgo(item.date_modified)) + '</span></div>' +
-      '<button type="button" class="mc-discover-install" data-market-action="install" data-id="' +
-      id + '" ' + (disabled ? 'disabled' : '') + '>' + buttonLabel + '</button></div></article>';
+      '<div class="mc-install-actions"><button type="button" class="mc-discover-install" data-market-action="install" data-id="' +
+      id + '" ' + (disabled||queued ? 'disabled' : '') + '>' + buttonLabel + '</button>' +
+      (queued?'<button type="button" class="mc-queue-remove" data-market-action="unqueue" data-id="'+id+'" aria-label="Remove queued install" title="Remove from queue">×</button>':'') +
+      '</div></div></article>';
   }
 
   function renderResults() {
@@ -142,7 +165,9 @@
   }
 
   function render(online) {
+    const changedOnline=state.online!==Boolean(online);
     state.online = Boolean(online);
+    if(changedOnline){state.inventoryLoaded=false;state.latestReleases={};}
     const container = document.getElementById("content");
     if (!container) return;
     container.innerHTML = '<section id="mc-marketplace" class="mc-discover">' +
@@ -180,6 +205,7 @@
     renderInstalled();
     renderResults();
     ensureQueueLoaded();
+    ensureInventoryLoaded();
   }
 
   function renderInstalled() {
@@ -216,6 +242,37 @@
       status("Queued install removed.",false);
     }catch(e){status("Could not remove queued install: "+String(e).slice(0,150),true)}
   }
+  async function ensureInventoryLoaded(force=false){
+    if(state.inventoryBusy || state.inventoryLoaded&&!force&&state.inventoryLive===state.online)return;
+    state.inventoryBusy=true;
+    try{
+      const inventory=await invoke("modrinth_installed_inventory",{live:state.online});
+      if(inventory&&typeof inventory==="object"){
+        state.inventory={installed:inventory.installed||{},pluginFiles:inventory.pluginFiles||[],datapackFiles:inventory.datapackFiles||[]};
+        state.inventoryLoaded=true;state.inventoryLive=state.online;
+        if(active()){renderResults();loadLatestReleases();}
+      }
+    }catch(error){
+      // A server may have no backups yet. Browsing Modrinth still works.
+      state.inventoryLoaded=false;
+      if(active())status("Installed-version check unavailable: "+String(error).slice(0,130),true);
+    }finally{state.inventoryBusy=false;}
+  }
+  async function loadLatestReleases(){
+    const records=state.inventory.installed||{};
+    const hits=state.hits.filter(item=>records[item.project_id]&&!state.latestReleases[item.project_id]);
+    for(const item of hits.slice(0,20)){
+      const id=item.project_id;
+      if(state.latestReleases[id])continue;
+      state.latestReleases[id]={pending:true};
+      try{
+        const candidates=await invoke("modrinth_versions",{projectId:id,kind:state.kind});
+        state.latestReleases[id]=Array.isArray(candidates)?
+          candidates.find(v=>v.version_type==="release")||candidates[0]||{unavailable:true}:{unavailable:true};
+      }catch{state.latestReleases[id]={unavailable:true};}
+      if(active())renderResults();
+    }
+  }
   async function search() {
     const epoch = ++state.epoch;
     state.loading = true;
@@ -231,6 +288,7 @@
       state.total = Number(result.total_hits) || 0;
       state.loaded = true;
       status("", false);
+      loadLatestReleases();
     } catch (error) {
       if (epoch !== state.epoch) return;
       state.hits = [];
@@ -260,7 +318,7 @@
   }
   async function install(projectId) {
     if (state.installing) return;
-
+    if(state.queued[projectId])return status("This project is queued. Use × to remove it before choosing another release.",false);
     if (state.version !== "26.3") return status("Select version 26.3 to install onto this server.", true);
     const candidate = state.hits.find(x => x.project_id === projectId);
     if (!candidate) return;
@@ -286,6 +344,8 @@
       const result = answer.result;
       state.installed = state.installed.filter(x => x.projectId !== projectId);
       state.installed.push({ ...result, projectId });
+      state.inventory.installed[projectId]={versionId:version.id,kind:state.kind,version:version.version_number,title:candidate.title};
+      state.latestReleases[projectId]=version;
       status(result.name + (result.restartRequired ?
         " installed successfully. Use Safe Restart to activate this plugin." :
         " installed successfully. Datapack reload requested."), false);
@@ -313,6 +373,7 @@
     }
     if (action === "install") install(el.dataset.id);
     if (action === "unqueue") unqueue(el.dataset.id);
+    if (action === "refresh-installed") ensureInventoryLoaded(true);
     if (action === "previous" && state.page > 0) {
       state.page--; search();
       root()?.scrollIntoView({ behavior: "smooth", block: "start" });
