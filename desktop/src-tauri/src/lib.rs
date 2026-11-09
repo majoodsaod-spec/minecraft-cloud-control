@@ -988,7 +988,9 @@ async fn direct_start_stream(app: tauri::AppHandle) -> Result<(), String> {
             Ok(client) => client,
             Err(_) => return,
         };
+        let mut failed_connections=0_u32;
         loop {
+            let mut established=false;
             // Token and peer selection can change in Connections. Rediscover
             // on reconnect without ever sending credentials to the frontend.
             let token = secret(DIRECT_SECRET);
@@ -998,6 +1000,7 @@ async fn direct_start_stream(app: tauri::AppHandle) -> Result<(), String> {
                     let endpoint = format!("http://{ip}:8765/api/events");
                     if let Ok(response) = client.get(&endpoint).bearer_auth(token).send().await {
                         if response.status().is_success() {
+                            established=true;
                             let mut stream = response.bytes_stream();
                             let mut buffer = String::new();
                             // Server emits a sample every second. If a
@@ -1028,7 +1031,11 @@ async fn direct_start_stream(app: tauri::AppHandle) -> Result<(), String> {
                 }
             }
             let _ = app.emit("paper-live-disconnected", json!({}));
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            // Bounded backoff prevents tight NetBird discovery loops while
+            // a GitHub runner is offline. A healthy stream reconnects quickly.
+            failed_connections=if established {0} else {failed_connections.saturating_add(1).min(4)};
+            let delay=if established {2} else {(3_u64 << failed_connections.min(3)).min(20)};
+            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
         }
     });
     Ok(())
