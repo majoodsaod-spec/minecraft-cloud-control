@@ -11,15 +11,18 @@ fn safe_server_file(path:&str,write:bool)->bool {
     if path.is_empty() {return !write;}
     if !valid_path(path){return false;}
     let parts=path.split('/').collect::<Vec<_>>();
-    if parts.iter().any(|p|p.starts_with('.')
-        || ["playerdata","stats","advancements","cache","libraries","logs","crash-reports"].contains(p)){return false;}
+    if parts.iter().any(|p|p.starts_with('.') ||
+        ["playerdata","stats","advancements","cache","libraries","logs","crash-reports"]
+        .contains(&p.to_ascii_lowercase().as_str())){return false;}
     let name=parts.last().copied().unwrap_or("");
+    let lower_name=name.to_ascii_lowercase();
     if ["key.pem","eula.txt","usercache.json","ops.json","whitelist.json",
-        "banned-players.json","banned-ips.json","credentials.json","secrets.json"].contains(&name){return false;}
+        "banned-players.json","banned-ips.json","credentials.json","secrets.json"]
+        .contains(&lower_name.as_str()){return false;}
     if parts.len()>=3&&parts[0]=="plugins"&&parts[1].eq_ignore_ascii_case("Geyser-Spigot")&&name=="config.yml"{return false;}
     if write {
-        if parts.iter().any(|p|*p=="world"||p.starts_with("world_")){return false;}
-        if name=="server.properties"{return false;}
+        if parts.iter().any(|p|p.eq_ignore_ascii_case("world")||p.to_ascii_lowercase().starts_with("world_")){return false;}
+        if lower_name=="server.properties"{return false;}
         if !["txt","json","yml","yaml","properties","conf","cfg","toml","md"].contains(&name.rsplit('.').next().unwrap_or("")){return false;}
     }
     true
