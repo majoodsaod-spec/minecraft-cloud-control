@@ -240,40 +240,42 @@ function runRow(r,withCancel=false){
     (withCancel&&activeRun(r)&&!isServer(r)?`<button class="btn small danger" data-action="cancel" data-id="${Number(r.id)}">Cancel</button>`:"");
   return `<div class="run"><div class="run-icon ${cls}">${glyph}</div><div class="run-content"><strong>${esc(r.display_title||r.name||"GitHub workflow")}</strong><span>${esc(r.name||"")} · ${esc(ago(r.created_at))} · #${esc(r.run_number||r.id)}</span></div><span class="run-status ${cls}">${esc(label)}</span><span class="row-buttons">${buttons}</span></div>`;
 }
-// A phase-based (not fabricated percent) progress bar remains visible on every page.
-const lifecycleStages={
-  starting:["Requested","Runner","Loading world","Paper ready"],
-  stopping:["Requested","Saving world","Backing up","Stopped"],
-  restarting:["Requested","Saving world","Backing up","Starting","Paper ready"],
-  restoring:["Requested","Saving world","Backing up","Restoring","Paper ready"]
-};
+// The server operation spans GitHub runner handoffs. Progress must NEVER
+// regress to Requested after a verified backup completes.
+const lifecycleStages=window.ServerLifecycle.stages;
 function observedPhase(){
   if(state.direct&&directOnline()&&state.direct.phase)return state.direct.phase;
   return state.cloud?.bridge?.status?.phase||"";
 }
 function operationSnapshot(){
-  const op=state.operation;
   const main=latestServerRun();
-  const currentSession=(directOnline()?state.direct:state.cloud?.bridge?.status)?.session;
-  const ready=connectedLive() && !["shutdown_requested","saving","stopping","backing_up","stopped"].includes(observedPhase());
-  const status=main?.status;
-  if(!op){
-    const phase=observedPhase();
-    if(["shutdown_requested","saving","stopping","backing_up"].includes(phase))return {kind:state.cloud?.bridge?.desired==="on"?"restarting":"stopping",step:phase};
-    if(activeRun(main)&&!ready)return {kind:"starting",step:status==="queued"?"Requested":"Runner"};
+  const direct=directOnline()?state.direct:null;
+  const cloud=state.cloud?.bridge?.status||{};
+  const selected=direct||cloud;
+  const phase=observedPhase();
+  const ready=connectedLive() && selected.ready &&
+    !["shutdown_requested","saving","stopping","backing_up","stopped"].includes(phase);
+  const session=selected.session||null;
+  // A stale Cloudflare bridge state must not create a phantom new operation.
+  const fresh=Boolean(direct)||(cloud.updatedAt &&
+    Date.now()-Number(cloud.updatedAt)<45000);
+  if(!state.operation){
+    if(fresh&&["shutdown_requested","saving","stopping","backing_up"].includes(phase)){
+      const kind=state.cloud?.bridge?.desired==="on"?"restarting":"stopping";
+      state.operation=window.ServerLifecycle.create(kind,session,main?.id);
+    }else if(activeRun(main)&&!ready){
+      state.operation=window.ServerLifecycle.create("starting",session,main?.id);
+    }else return null;
+  }
+  const next=window.ServerLifecycle.advance(state.operation,{
+    phase,session,ready,runId:main?.id,runStatus:main?.status,
+    runConclusion:main?.conclusion,now:Date.now()
+  });
+  if(!next){
+    state.operation=null;
     return null;
   }
-  const changedSession=currentSession && currentSession!==op.session;
-  if(op.kind==="starting"&&ready&&(!op.session||changedSession)){state.operation=null;return null;}
-  if(["restarting","restoring"].includes(op.kind)&&changedSession&&ready){state.operation=null;return null;}
-  if(op.kind==="stopping"&&!activeRun(main)&&!ready&&Date.now()-op.at>4000){state.operation=null;return null;}
-  const phase=observedPhase();
-  let step=op.step;
-  if(["saving","stopping","backing_up"].includes(phase))step=phase;
-  else if(["restarting","restoring"].includes(op.kind)&&changedSession)step=ready?"Paper ready":"Starting";
-  else if(op.kind==="starting"&&activeRun(main))step=ready?"Paper ready":"Runner";
-  else if(op.kind==="stopping"&&!ready)step=activeRun(main)?"Backing up":"Stopped";
-  return {kind:op.kind,step};
+  return next;
 }
 function lifecycleActive(){return Boolean(operationSnapshot())}
 function syncServerOperation(){
@@ -283,27 +285,22 @@ function syncServerOperation(){
   if(!current)return;
   const kind=current.kind;
   const title={starting:"Starting server",stopping:"Stopping server",restarting:"Restarting server",restoring:"Restoring world"}[kind]||"Server operation";
-  $("#serverOperationTitle").textContent=title;
+  $("#serverOperationTitle").textContent=current.failed?"Server operation needs attention":title;
   const stages=lifecycleStages[kind]||lifecycleStages.starting;
-  const phase=current.step;
-  const at=phase==="shutdown_requested"?0:phase==="saving"?1:phase==="stopping"?1:phase==="backing_up"?2:Math.max(0,stages.findIndex(s=>s.toLowerCase()===String(phase).toLowerCase()));
-  const index=Math.min(stages.length-1,Math.max(0,at));
-  $("#serverOperationStep").textContent=stages[index];
-  $("#serverOperationStages").innerHTML=stages.map((stage,i)=>'<span class="server-operation-stage '+(i<index?"complete":i===index?"current":"")+'"><i></i>'+esc(stage)+'</span>').join("");
-  const detail={
-    saving:"Paper is flushing world data and disconnecting players.",
-    stopping:"Waiting for a clean Paper exit.",
-    backing_up:"Creating and verifying the world backup.",
-    starting:"Waiting for GitHub runner and Paper readiness.",
-    restarting:"Saving the current world and starting a new session.",
-    restoring:"Restoring the selected verified snapshot."
-  }[phase]||"Waiting for the next confirmed server or workflow phase.";
-  $("#serverOperationDetail").textContent=detail;
+  const index=current.stageIndex;
+  $("#serverOperationStep").textContent=current.failed?"Check logs":window.ServerLifecycle.label(current);
+  $("#serverOperationStages").innerHTML=stages.map((stage,i)=>
+    '<span class="server-operation-stage '+(i<index?"complete":i===index?"current":"")+
+    '"><i></i>'+esc(stage)+'</span>').join("");
+  $("#serverOperationDetail").textContent=window.ServerLifecycle.detail(current);
   $("#serverOperationSource").textContent=connectedLive()?"Paper live status":"GitHub Actions status";
+  box.classList.toggle("failed",Boolean(current.failed));
 }
 function beginOperation(kind){
+  // Repeated status requests must not reset a restart already in progress.
+  if(state.operation?.kind===kind&&!state.operation.failed)return syncServerOperation();
   const session=(directOnline()?state.direct:state.cloud?.bridge?.status)?.session||null;
-  state.operation={kind,session,at:Date.now(),step:"Requested"};
+  state.operation=window.ServerLifecycle.create(kind,session,latestServerRun()?.id);
   syncServerOperation();
 }
 function clockDisplay(field){
