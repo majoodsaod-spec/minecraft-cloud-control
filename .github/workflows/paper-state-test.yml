@@ -209,7 +209,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          python -c 'from pathlib import Path; from server.reliability import markdown_summary; print(markdown_summary(Path("cycle-output/lifecycle-report.json")))' >> "$GITHUB_STEP_SUMMARY"
+          python -c 'from pathlib import Path; from server.reliability import markdown_summary; print(markdown_summary(Path("cycle-output/lifecycle-report.json")))' >> "$GITHUB_STEP_SUMMARY" || echo "::warning::Optional lifecycle summary unavailable; verified backup flow unaffected"
       - name: Preserve safe diagnostics when startup fails
         if: failure()
         uses: actions/upload-artifact@v4
