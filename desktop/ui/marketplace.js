@@ -80,12 +80,13 @@
     const queued=state.queued[item.project_id];
     const same=record&&latest&&record.versionId===latest.id;
     const hasKnown=Boolean(record?.versionId);
-    const checking=Boolean(record?.versionId)&&!latest;
+    const checking=Boolean(record?.versionId)&&(!latest||latest.pending);
+    const unavailable=Boolean(record?.versionId&&latest?.unavailable);
     const current=Boolean(same||unmanaged||record&&!hasKnown);
     const disabled = Boolean(state.installing) || state.version !== "26.3" ||
-      Boolean(current&&!queued) || Boolean(checking&&!queued);
+      Boolean(current&&!queued) || Boolean(checking&&!queued) || Boolean(unavailable&&!queued);
     const buttonLabel = installing?"Processing…" : queued?"Queued" :
-      current?"Installed" : checking?"Checking…" :
+      current?"Installed" : checking?"Checking…" : unavailable?"Version unavailable" :
       record && hasKnown ? (state.online?"Update":"Queue update") :
       state.online?"Install":"Queue install";
     return '<article class="mc-discover-card">' +
