@@ -357,7 +357,9 @@ function recordMetric(snapshot){
   if(now-state.metricAt<5000)return;
   state.metricAt=now;
   state.metricHistory.push({at:now,cpu:Math.max(0,cpu),memory:Math.max(0,100*memory/limit),
-    diskFree:Number.isFinite(free)?free:null});
+    diskFree:Number.isFinite(free)?free:null,
+    tps:snapshot.tps==null?null:Number(snapshot.tps),
+    mspt:snapshot.mspt==null?null:Number(snapshot.mspt)});
   if(state.metricHistory.length>120)state.metricHistory.shift();
 }
 function resourceHistory(){
@@ -368,8 +370,13 @@ function resourceHistory(){
     const y=Number((106-Math.min(max,item[field])*90/max).toFixed(2));
     return (i?"L":"M")+x+" "+y;
   }).join(" ");
-  const last=points[points.length-1],live=currentPaper();
-  const pressure=last.memory>=90?"High Java memory pressure":last.diskFree!==null&&last.diskFree<1024?"Runner disk space is low":"No resource threshold reached";
+  const latest=points.slice(-3);
+  const sustained=condition=>latest.length===3&&latest.every(condition);
+  const pressure=sustained(x=>x.mspt!==null&&x.mspt>=50)||sustained(x=>x.tps!==null&&x.tps<18.5)?
+    "Sustained tick lag detected · review Spark profiler":
+    sustained(x=>x.memory>=90)?"Sustained high Java memory usage":
+    sustained(x=>x.diskFree!==null&&x.diskFree<1024)?"Sustained low runner disk space":
+    "No sustained resource warning";
   return panel("Resource history",`<div class="metric-legend"><span>● CPU (0–400% scale)</span><span>● Java memory (% of configured heap)</span></div>
     <svg class="resource-chart" viewBox="0 0 600 120" role="img" aria-label="Recent Paper CPU and memory usage trends">
       <path d="M12 16H588 M12 61H588 M12 106H588" fill="none" stroke="#e6eceb" stroke-width="1"/>
@@ -397,6 +404,8 @@ function drawOverview(){
    ${stat("Memory used",online&&!pendingOperation&&live.memoryMiB!=null?Number(live.memoryMiB).toFixed(0)+" MB":"—","Paper Java process","▦")}
    ${stat("CPU used",online&&!pendingOperation&&Number.isFinite(live.cpuPercent)?Number(live.cpuPercent).toFixed(1)+"%":"—","Paper process · 100% = one CPU core","◈")}
    ${stat("Runner disk free",online&&!pendingOperation&&Number.isFinite(live.diskFreeMiB)?(Number(live.diskFreeMiB)/1024).toFixed(1)+" GiB":"—","Temporary runner storage · not backup capacity","▤")}
+   ${stat("Paper TPS",online&&!pendingOperation&&live.tps!=null&&Number.isFinite(Number(live.tps))?Number(live.tps).toFixed(2):"—","Actual Paper tick rate · target 20","◉")}
+   ${stat("Paper MSPT",online&&!pendingOperation&&live.mspt!=null&&Number.isFinite(Number(live.mspt))?Number(live.mspt).toFixed(1)+" ms":"—","Actual average tick duration · target below 50 ms","◷")}
   </div>`;
   const runnerCard=main?panel("GitHub runner · independent status",`<div class="list-stat"><span>Latest Minecraft run</span><strong>#${esc(main.run_number)}</strong></div><div class="list-stat"><span>Workflow status</span><strong>${esc(main.conclusion||main.status||"unknown")}</strong></div><div class="list-stat"><span>Workflow elapsed (approx.)</span><strong data-live="runner">${runnerElapsed!==null?duration(runnerElapsed):"—"}</strong></div><p class="field-tip" style="margin-top:14px">Workflow elapsed is estimated from GitHub timestamps and may include queue time; it is not Paper uptime. Minecraft player and memory metrics require a functioning live bridge.</p><button class="btn small flat" data-action="server-logs">View GitHub job logs</button>`):"";
   const runs=state.overview?.runs||[];
