@@ -95,6 +95,21 @@ class PendingOperationsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported"):
             load_operations(self.manifest)
 
+    def test_custom_world_name_is_protected_by_runtime_gate(self):
+        settings = self.root / "server.properties"
+        settings.write_text("level-name=MySMP\n", encoding="utf-8")
+        custom = self.data / "MySMP"
+        custom.mkdir()
+        (custom / "notes.yml").write_text("keep this safe", encoding="utf-8")
+        self.queue(op("delete", "MySMP/notes.yml", 1))
+        with self.assertRaisesRegex(ValueError, "World data"):
+            apply_pending_operations(self.data, self.manifest, self.edits, settings)
+        self.assertEqual((custom / "notes.yml").read_text(), "keep this safe")
+        self.edits.write_text(json.dumps({"MySMP/notes.yml": "malicious edit"}))
+        with self.assertRaisesRegex(ValueError, "World data"):
+            apply_pending(self.data, self.edits, settings)
+        self.assertEqual((custom / "notes.yml").read_text(), "keep this safe")
+
     def test_symlinked_parent_refused(self):
         outside = self.root / "external"
         outside.mkdir()
