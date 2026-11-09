@@ -16,7 +16,7 @@ class TimingsTests(unittest.TestCase):
     def test_lifecycle_record_is_bounded_and_redacts_exception_message(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "report.json"
-            values = iter([10.0, 11.0, 14.0, 16.0])
+            values = iter([10.0, 11.0, 14.0, 16.0, 18.0])
             r = LifecycleRecorder(path, clock=lambda: next(values))
             with r.stage("restore_backup"):
                 pass
