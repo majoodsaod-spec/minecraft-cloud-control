@@ -440,7 +440,7 @@ async fn modrinth_queue_add(project_id:String,version_id:String,kind:String,titl
     }
     if kind=="plugin"{
         let (actions,_)=pending_content_actions().await?;
-        if ["remove","disable"].contains(&actions[&project_id].as_str().unwrap_or("")){
+        if ["remove","disable"].contains(&actions[project_id.as_str()].as_str().unwrap_or("")){
             return Err("This plugin is queued for removal or disablement. Cancel that action before updating.".into());
         }
     }
