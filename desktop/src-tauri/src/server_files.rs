@@ -438,6 +438,12 @@ async fn modrinth_queue_add(project_id:String,version_id:String,kind:String,titl
         || title.len()>160||title.chars().any(char::is_control) {
         return Err("Invalid Modrinth installation request".into());
     }
+    if kind=="plugin"{
+        let (actions,_)=pending_content_actions().await?;
+        if ["remove","disable"].contains(&actions[&project_id].as_str().unwrap_or("")){
+            return Err("This plugin is queued for removal or disablement. Cancel that action before updating.".into());
+        }
+    }
     // Verify the remote project and version before allowing persistent staging.
     let project=http().get(format!("https://api.modrinth.com/v2/project/{project_id}"))
         .send().await.map_err(|_|"Could not verify Modrinth project")?;
