@@ -38,7 +38,7 @@ def unsafe_shutdown_command(command: str) -> bool:
 
 
 class LiveBridge:
-    def __init__(self, data: Path, session: str, players: set, lock, log_lines, ready, send, restart_event, shutdown_event, observed, paper_pid):
+    def __init__(self, data: Path, session: str, players: set, lock, log_lines, ready, send, restart_event, shutdown_event, observed, paper_pid, metrics=None):
         self.data=data.resolve()
         self.session=session
         self.players=players
@@ -50,6 +50,7 @@ class LiveBridge:
         self.shutdown_event=shutdown_event
         self.observed=observed
         self.paper_pid=paper_pid
+        self.metrics=metrics
         self.url=os.environ.get("CLOUDFLARE_CONTROL_URL", "").rstrip("/")
         self.token=os.environ.get("CLOUDFLARE_BRIDGE_TOKEN", "")
         self.acked=deque(maxlen=50)
@@ -420,6 +421,7 @@ class LiveBridge:
                     "idleRestartIn":idle_remaining,"emptyFor":empty_seconds,
                     "memoryMiB":self._memory_mb(),"memoryLimitMiB":8192,
                     "cpuPercent":self._cpu_percent(),**self._disk_space(),
+                    **(self.metrics.snapshot() if self.metrics is not None else {"tps":None,"mspt":None}),
                     "startupTimings":dict(self.startup_timings),
                     "phase":self.lifecycle_phase if self.lifecycle_phase!="starting" else ("running" if self.ready.is_set() else "starting")}
             outgoing=list(self.acked)
