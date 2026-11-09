@@ -1155,6 +1155,8 @@ pub fn run() {
             github_workflows,github_runs,github_dispatch,github_cancel,github_jobs,github_job_log,
             github_file,github_save_file,github_download_backup,
             server_files_pending,server_files_stage,server_files_unstage,
+            server_operations_list,server_operations_add,server_operations_remove,
+            server_change_queue,server_change_receipts,
             server_files_list,server_files_read,server_settings_get,server_settings_save,
             modrinth_queue_list,modrinth_queue_add,modrinth_queue_remove,
             modrinth_installed_inventory,
