@@ -122,6 +122,28 @@ class PlayersDirectoryTests(unittest.TestCase):
         self.assertTrue(result["whitelistEnabled"])
         self.assertNotIn("UUID-MUST-NOT-LEAK",json.dumps(result))
 
+    def test_legacy_inventory_never_exposes_invalid_player_names(self):
+        (self.data/"usercache.json").write_text(json.dumps([
+            {"name":"ValidJava","uuid":"private-uuid"},
+            {"name":";stop","uuid":"private-uuid"},
+            {"name":"Name With Spaces"},
+            {"name":".ValidBedrock"},
+            {"name":"A"*49},
+            {"name":None},
+            {"unexpected":"missing-name"},
+        ]))
+        self.bridge.players.add("bad;command")
+        response=self.bridge._execute({"type":"players-inventory","args":{}})
+        self.assertEqual(response["known"],[".ValidBedrock","ValidJava"])
+        self.assertNotIn("bad;command",response["online"])
+        self.assertNotIn("private-uuid",json.dumps(response))
+
+    def test_legacy_inventory_malformed_json_does_not_break_commands(self):
+        (self.data/"usercache.json").write_text("{malformed")
+        response=self.bridge._execute({"type":"players-inventory","args":{}})
+        self.assertEqual(response["known"],[])
+        self.assertEqual(len(response["online"]),2)
+
     def test_java_and_bedrock_commands_use_safe_player_names(self):
         self.bridge._execute({"type":"whitelist-add","args":{"player":".BedrockA"}})
         self.bridge._execute({"type":"kick","args":{"player":"JavaUser"}})
