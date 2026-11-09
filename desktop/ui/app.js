@@ -345,8 +345,10 @@ function recoveryWarning(){
 }
 function recordMetric(snapshot){
   if(!snapshot||!snapshot.ready||!snapshot.session)return;
+  if(snapshot.cpuPercent==null||snapshot.memoryMiB==null||snapshot.memoryLimitMiB==null)return;
   const cpu=Number(snapshot.cpuPercent),memory=Number(snapshot.memoryMiB);
-  const limit=Number(snapshot.memoryLimitMiB),free=Number(snapshot.diskFreeMiB);
+  const limit=Number(snapshot.memoryLimitMiB),
+        free=snapshot.diskFreeMiB==null?NaN:Number(snapshot.diskFreeMiB);
   if(!Number.isFinite(cpu)||!Number.isFinite(memory)||!Number.isFinite(limit)||limit<=0)return;
   const now=Date.now();
   if(state.metricSession!==snapshot.session){
