@@ -42,6 +42,10 @@ jobs:
         run: |
           node --input-type=module --check < src/worker.js
           node --input-type=module --check < src/bridge.js
+      - name: Test desktop server lifecycle handoff and progress
+        run: |
+          node --check desktop/ui/server_lifecycle.js
+          node --test tests/test_server_lifecycle.mjs
       - name: Test live bridge free-tier behavior
         run: node --test tests/test_bridge_free_tier.mjs
       - name: Verify shared Cloudflare and Windows interface system
