@@ -253,7 +253,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
-      - name: Delete surplus Minecraft world backups, never the latest five
+      - name: Delete surplus Minecraft world backups, never the latest ten
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -288,7 +288,7 @@ jobs:
           echo "Deleted $count redundant older world backups; reclaimed approximately $((bytes / 1048576)) MiB."
           {
             echo "### Minecraft world backup storage"
-            echo "- Kept the 5 newest verified backup artifacts."
+            echo "- Kept the 10 newest verified backup artifacts."
             echo "- Deleted $count older backup artifacts."
             echo "- Reclaimed approximately $((bytes / 1048576)) MiB."
             echo "- Kept the newly uploaded backup for run $GITHUB_RUN_ID."
