@@ -33,7 +33,7 @@
     loaded: false, installing: "", notice: "", error: false, installed: [],
     queued: {}, queueLoaded: false, queueBusy: false,
     inventory: {installed:{},pluginFiles:[],datapackFiles:[]}, inventoryLoaded:false,inventoryBusy:false,
-    inventoryLive:null,latestReleases:{},tab:"browse",contentActions:{},actionsLoaded:false,
+    inventoryLive:null,inventorySession:null,latestReleases:{},tab:"browse",contentActions:{},actionsLoaded:false,
     actionBusy:false,versionLoading:false,updatingAll:false,
     sortTouched: false,
     online: false, epoch: 0, searchTimer: null
@@ -168,9 +168,11 @@
       '</section><button type="button" class="mc-discover-clear" data-market-action="reset">↺ Reset all filters</button></aside>';
   }
 
-  function render(online) {
-    const changedOnline=state.online!==Boolean(online);
+  function render(online,session=null) {
+    const changedOnline=state.online!==Boolean(online)||
+      (Boolean(online)&&Boolean(session)&&session!==state.inventorySession);
     state.online = Boolean(online);
+    if(session)state.inventorySession=session;
     if(changedOnline){state.inventoryLoaded=false;state.latestReleases={};state.actionsLoaded=false;}
     const container = document.getElementById("content");
     if (!container) return;
@@ -421,8 +423,8 @@
     }catch(error){status("Could not remove action: "+String(error).slice(0,160),true);}
   }
 
-  async function ensureQueueLoaded(){
-    if(state.queueLoaded||state.queueBusy)return;
+  async function ensureQueueLoaded(force=false){
+    if((state.queueLoaded&&!force)||state.queueBusy)return;
     state.queueBusy=true;
     try{
       const queued=await invoke("modrinth_queue_list");
@@ -616,5 +618,6 @@
     }
     search();
   });
-  window.McMarketplace = { render, ensureLoaded };
+  window.McMarketplace = { render, ensureLoaded,
+    refreshQueueState:()=>Promise.all([ensureQueueLoaded(true),ensureContentActionsLoaded(true)]) };
 })();
