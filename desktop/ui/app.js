@@ -360,6 +360,8 @@ function drawOverview(){
    ${stat("Server uptime",clockDisplay("uptime"),"Current runner session","◷","uptime")}
    ${stat("Empty time",clockDisplay("emptyFor"),"Restart after 1 hour empty","⌛","empty")}
    ${stat("Memory used",online&&!pendingOperation&&live.memoryMiB!=null?Number(live.memoryMiB).toFixed(0)+" MB":"—","Paper Java process","▦")}
+   ${stat("CPU used",online&&!pendingOperation&&Number.isFinite(live.cpuPercent)?Number(live.cpuPercent).toFixed(1)+"%":"—","Paper process · 100% = one CPU core","◈")}
+   ${stat("Runner disk free",online&&!pendingOperation&&Number.isFinite(live.diskFreeMiB)?(Number(live.diskFreeMiB)/1024).toFixed(1)+" GiB":"—","Temporary runner storage · not backup capacity","▤")}
   </div>`;
   const runnerCard=main?panel("GitHub runner · independent status",`<div class="list-stat"><span>Latest Minecraft run</span><strong>#${esc(main.run_number)}</strong></div><div class="list-stat"><span>Workflow status</span><strong>${esc(main.conclusion||main.status||"unknown")}</strong></div><div class="list-stat"><span>Workflow elapsed (approx.)</span><strong data-live="runner">${runnerElapsed!==null?duration(runnerElapsed):"—"}</strong></div><p class="field-tip" style="margin-top:14px">Workflow elapsed is estimated from GitHub timestamps and may include queue time; it is not Paper uptime. Minecraft player and memory metrics require a functioning live bridge.</p><button class="btn small flat" data-action="server-logs">View GitHub job logs</button>`):"";
   const runs=state.overview?.runs||[];
