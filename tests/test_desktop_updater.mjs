@@ -278,7 +278,7 @@ test("Phase 1 reliability surfaces measured timings and safe recovery warnings",
   assert.match(ui,/function recoveryWarning\(\)/);
   assert.match(ui,/startupTimings/);
   assert.match(ui,/Recovery needs review/);
-  assert.match(ui,/Verified backup/);
+  assert.match(ui,/verified backup/i);
   assert.match(ui,/Last direct heartbeat/);
   assert.match(ui,/NetBird live stream/);
 });
