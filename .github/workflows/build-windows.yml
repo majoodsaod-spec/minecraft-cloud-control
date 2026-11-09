@@ -79,8 +79,26 @@ jobs:
         env:
           MC_DESKTOP_BUILD_RUN_ID: ${{ github.run_id }}
         run: |
-          cargo tauri build --bundles nsis
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # A transient 429/5xx from GitHub's NSIS binary release CDN must not
+          # turn an otherwise successful Rust compilation into a failed update.
+          # Retry packaging only for a recognizable temporary download error.
+          $attempts = 5
+          for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+            Write-Host "Windows installer packaging attempt $attempt/$attempts"
+            & cargo tauri build --bundles nsis *>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\tauri-nsis-build.log"
+            $result = $LASTEXITCODE
+            if ($result -eq 0) { exit 0 }
+            $log = Get-Content "$env:RUNNER_TEMP\tauri-nsis-build.log" -Raw
+            $temporaryDownloadError = $log -match 'http status: (429|500|502|503|504)' -or
+              ($log -match 'failed to bundle project' -and $log -match '(timed out|connection reset|network error)')
+            if (-not $temporaryDownloadError -or $attempt -eq $attempts) {
+              Write-Error "Installer packaging failed. Exit code: $result. No safe retry condition remaining."
+              exit 1
+            }
+            $delay = [Math]::Min(60, 10 * $attempt)
+            Write-Warning "Temporary NSIS download error; retrying packaging in $delay seconds."
+            Start-Sleep -Seconds $delay
+          }
       - name: Upload Windows setup executable
         uses: actions/upload-artifact@v4
         with:
