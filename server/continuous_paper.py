@@ -356,9 +356,11 @@ def main() -> None:
                                   WORK.parent / "server" / "server.properties")
         with recorder.stage("queued_file_operations"):
             apply_pending_operations(DATA, WORK.parent / "server" / "pending-operations.json",
-                                     WORK.parent / "server" / "pending-files.json")
+                                     WORK.parent / "server" / "pending-files.json",
+                                     WORK.parent / "server" / "server.properties")
         with recorder.stage("queued_file_changes"):
-            apply_pending(DATA, WORK.parent / "server" / "pending-files.json")
+            apply_pending(DATA, WORK.parent / "server" / "pending-files.json",
+                          WORK.parent / "server" / "server.properties")
         with recorder.stage("queued_modrinth"):
             apply_modrinth_queue(DATA, WORK.parent / "server" / "pending-modrinth.json")
         config = json.loads(CONFIG.read_text())
