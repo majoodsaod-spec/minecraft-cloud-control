@@ -19,7 +19,7 @@ def allowed(backup_run_id, artifacts, runs, current_run_id):
     backups = [a for a in artifacts if isinstance(a, dict)
                and a.get("name") == "minecraft-world" and not a.get("expired")]
     if backup_run_id:
-        backed = [a for a in backups if a.get("workflow_run", {}).get("id") == backup_run_id]
+        backed = [a for a in backups if (a.get("workflow_run") or {}).get("id") == backup_run_id]
         if not backed:
             return False, "Selected verified backup is missing"
         last_backup = max((a.get("created_at", "") for a in backed), default="")
