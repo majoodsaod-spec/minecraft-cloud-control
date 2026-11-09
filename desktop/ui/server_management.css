@@ -42,3 +42,24 @@
 .server-toggle:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:1050px){.server-setting-grid{grid-template-columns:1fr}.server-manager-layout{grid-template-columns:1fr}}
 @media(max-width:640px){.server-manager-settings-tools{align-items:stretch;flex-direction:column}.server-manager-settings-tools input{width:100%}}
+
+/* Phase 2 Explorer toolbar, folder search and unified staged-change queue. */
+.server-manager-file-search{padding:12px 0 5px}
+.server-manager-file-search input{width:100%;padding:9px 12px;border:1px solid #dae6e3;border-radius:9px;background:#fbfdfc;color:#29483b;font-size:12px}
+.server-manager-file-search input:focus{outline:2px solid #bce6d3}
+.server-manager-queue{margin-top:17px;padding:19px;min-height:unset}
+.server-queue-header{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;margin-bottom:13px}
+.server-queue-header h2{font-size:14px;margin:0 0 7px;color:#31484c}
+.server-queue-header p{margin:0;font-size:11px;line-height:1.5;color:#81949a}
+.server-queue-items{display:grid;gap:8px}
+.server-queue-item{display:flex;align-items:center;gap:12px;background:#fafdfb;border:1px solid #e6efea;border-radius:10px;padding:11px 12px}
+.server-queue-number{width:25px;height:25px;display:grid;place-items:center;flex-shrink:0;border-radius:8px;background:#edf7f0;color:#38876a;font-size:11px;font-weight:750}
+.server-queue-description{min-width:0;flex:1;display:flex;flex-direction:column;gap:5px}
+.server-queue-description strong{font-size:11.5px;color:#354e51;font-weight:690;overflow-wrap:anywhere}
+.server-queue-status{font-size:10px;color:#b1823b}
+.server-queue-status.applied{color:#288263}
+.server-queue-status.unknown{color:#82949a}
+.server-queue-remove{background:#fff;border:1px solid #e5e7e7;border-radius:8px;color:#b54c58;cursor:pointer;width:29px;height:29px;display:grid;place-items:center;font-size:18px;flex-shrink:0}
+.server-queue-remove:hover{background:#fff0f1;border-color:#f0c9d0}
+.server-manager .header-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+@media(max-width:640px){.server-queue-header{flex-direction:column}.server-manager .header-actions{width:100%}}
