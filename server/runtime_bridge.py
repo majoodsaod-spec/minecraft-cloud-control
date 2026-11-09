@@ -10,6 +10,10 @@ try:
 except ImportError:  # Launched as python server/continuous_paper.py
     from modrinth_install import install_modrinth, installed_inventory
 from pathlib import Path
+try:
+    from .performance_history import PerformanceHistory
+except ImportError:
+    from performance_history import PerformanceHistory
 import base64
 import binascii
 import json
@@ -51,6 +55,7 @@ class LiveBridge:
         self.observed=observed
         self.paper_pid=paper_pid
         self.metrics=metrics
+        self.performance_history=PerformanceHistory(self.data)
         self.url=os.environ.get("CLOUDFLARE_CONTROL_URL", "").rstrip("/")
         self.token=os.environ.get("CLOUDFLARE_BRIDGE_TOKEN", "")
         self.acked=deque(maxlen=50)
@@ -144,6 +149,8 @@ class LiveBridge:
             name=args.get("player","")
             if not isinstance(name,str) or not USERNAME.fullmatch(name):raise ValueError("Invalid player name")
             return name
+        if kind=="performance-history":
+            return self.performance_history.snapshot()
         if kind=="players-list":
             # A read-only, privacy-minimal projection of player records.
             # Raw UUID files and playerdata never leave the runner.
@@ -424,6 +431,15 @@ class LiveBridge:
                     **(self.metrics.snapshot() if self.metrics is not None else {"tps":None,"mspt":None}),
                     "startupTimings":dict(self.startup_timings),
                     "phase":self.lifecycle_phase if self.lifecycle_phase!="starting" else ("running" if self.ready.is_set() else "starting")}
+            if status["ready"]:
+                self.performance_history.record({
+                    "cpu":status.get("cpuPercent"),
+                    "memory":status.get("memoryMiB"),
+                    "diskFree":status.get("diskFreeMiB"),
+                    "tps":status.get("tps"),
+                    "mspt":status.get("mspt"),
+                    "players":len(players),
+                })
             outgoing=list(self.acked)
             try:
                 incoming=self._request({"session":self.session,"status":status,"acks":outgoing})
