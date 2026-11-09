@@ -23,7 +23,7 @@ from managed_plugins import install_managed_plugins
 from geyser_setup import configure_geyser
 from pending_files import apply_pending
 from pending_modrinth import apply_modrinth_queue
-from reliability import LifecycleRecorder, verify_restored_world
+from reliability import LifecycleRecorder, verify_restored_world, expected_world_directory
 from contextlib import nullcontext
 
 IDLE_SECONDS = 3600
@@ -325,7 +325,7 @@ def run(jar: Path, recorder: LifecycleRecorder | None = None) -> None:
             except (BrokenPipeError, subprocess.TimeoutExpired):
                 proc.kill()
                 proc.wait()
-        if graceful and (DATA / "world" / "level.dat").exists():
+        if graceful and (expected_world_directory(DATA, WORK.parent / "server" / "server.properties") / "level.dat").exists():
             bridge.phase("backing_up","Creating and verifying world backup")
             backup_started = time.monotonic()
             snapshot()
@@ -351,7 +351,8 @@ def main() -> None:
     try:
         with recorder.stage("restore_backup"):
             restore_snapshot()
-            verify_restored_world(DATA, os.environ.get("REQUIRE_RESTORE") == "true")
+            verify_restored_world(DATA, os.environ.get("REQUIRE_RESTORE") == "true",
+                                  WORK.parent / "server" / "server.properties")
         with recorder.stage("queued_file_changes"):
             apply_pending(DATA, WORK.parent / "server" / "pending-files.json")
         with recorder.stage("queued_modrinth"):
