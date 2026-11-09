@@ -33,10 +33,22 @@ Only the ten newest `minecraft-world` artifacts are retained after a verified su
 | Console | Recent live Paper stdout logs, commands, and command acknowledgments; output is not an interactive TTY |
 | File manager | Browse directories, read, edit, and delete small text files. Binary files and live world-data writes are blocked |
 | Plugins | Upload JARs up to 5 MiB, list them, enable/disable or remove; changes apply at next startup |
-| Worlds & backups | List verified backup artifacts, request a runtime world save, perform a safe restart for a complete backup, or restore a selected backup while stopped |
+| Worlds & backups | List the newest ten verified world artifacts, view authenticated aggregate world storage, safely restore a selected world, and atomically download snapshots |
+| Performance (Windows) | Real Paper TPS/MSPT, CPU, Java RSS, ephemeral runner disk capacity, a bounded time-series chart, sustained-condition warnings, and opt-in one-minute Spark profiling |
+| Automations (Windows) | Opt-in empty-server weekly UTC maintenance window; configuration takes effect when the next runner starts and uses the normal verified save-and-restart process |
 | Connections | Bridge connection state and runtime configuration information |
 
 The live bridge polls every 5 seconds, the full dashboard state polls every 30 seconds, and visible countdown values tick once per second. The browser never receives the GitHub token or bridge token. Plugin uploads and file operations are bounded for safety; larger/binary transfers and changing arbitrary live world files are not supported. The console relays commands but cannot guarantee immediate execution or return direct synchronous command responses.
+
+## Performance, monitoring and scheduled maintenance
+
+The desktop Overview displays genuine Paper TPS/MSPT from the built-in console commands rather than approximating them from host CPU. Missing or stale readings display dashes. CPU process utilization may exceed 100% on multi-core runners; storage metrics describe the disposable GitHub runner, **not** GitHub artifact retention. The agent collects bounded one-minute aggregate statistics in `.cloud-performance-history.json` inside the verified world snapshot; it does not record player names, addresses, or chat content. The native desktop app retrieves this history over the authenticated direct connection. Live samples are limited to ten minutes or the latest 120 displayed readings.
+
+The **Run 60-second Spark profile** action is optional and requires confirmation. Paper reports the profiler link in Live Console when finished. Profiling may consume server resources; it never starts automatically.
+
+The **Automations** page edits `server/automation-policy.json` on GitHub. Weekly maintenance defaults to disabled. When enabled, an eligible runner checks the chosen weekday/hour in UTC, and only begins a normal safe stop, world backup, and restart if it is empty throughout a 15-second warning. An empty-server maintenance receipt is included in the next backup so that the same week is not automatically retriggered. If players join, the maintenance window is skipped. This is best effort because GitHub runners can be stopped or delayed; it is **not** guaranteed wall-clock scheduling. After changing the policy, start a new runner or wait for a safe handoff before expecting the change to apply.
+
+World restores initiated while a server is active require the current server to finish safe shutdown **and** publish a new backup artifact; otherwise the restore aborts. Downloads are written as temporary files and renamed only after the transfer finishes. Keep off-platform copies of important worlds; GitHub artifact retention is not durable storage.
 
 ## Deploy the Cloudflare dashboard
 
