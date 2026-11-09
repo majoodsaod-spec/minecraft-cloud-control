@@ -176,6 +176,22 @@ class LiveBridge:
                 self.send("minecraft:reload")
                 result["reloadRequested"]=True
             return result
+        if kind=="file-queue-receipts":
+            def receipt(name):
+                path=self.data/name
+                if not path.is_file() or path.stat().st_size>131072:
+                    return {}
+                try:
+                    value=json.loads(path.read_text(encoding="utf-8"))
+                    if not isinstance(value,dict) or len(value)>1000:
+                        return {}
+                    return {str(k)[:180]:str(v)[:80] for k,v in value.items()
+                            if isinstance(k,str) and isinstance(v,str)}
+                except (OSError,ValueError):
+                    return {}
+            return {"operations":receipt(".cloud-applied-ops.json"),
+                    "edits":receipt(".cloud-applied-edits.json"),
+                    "installed":installed_inventory(self.data)}
         if kind=="marketplace-inventory":
             return {"installed":installed_inventory(self.data),
                     "pluginFiles":[p.name for p in (self.data/"plugins").glob("*.jar")][:250],
