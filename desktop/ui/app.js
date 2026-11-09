@@ -408,6 +408,9 @@ function drawMarketplace(){
 function drawFiles(){
   window.ServerManager.renderFiles(directOnline(),serverRunning());
 }
+function drawPlayers(){
+  window.PlayerManager.show(directOnline(),serverRunning(),currentPaper());
+}
 function drawSettings(){
   window.ServerManager.renderSettings();
 }
@@ -455,13 +458,13 @@ function editing(){
   return el&&["INPUT","TEXTAREA","SELECT"].includes(el.tagName);
 }
 function render(){
-  const titles={overview:"Overview",console:"Live Console",workflows:"GitHub Actions",files:"Server Files",settings:"Server Settings",marketplace:"Plugins & Datapacks",backups:"World Backups",connections:"Connections"};
+  const titles={overview:"Overview",console:"Live Console",workflows:"GitHub Actions",files:"Server Files",players:"Players",settings:"Server Settings",marketplace:"Plugins & Datapacks",backups:"World Backups",connections:"Connections"};
   $("#breadcrumb").textContent=titles[state.page]||"Overview";
   document.querySelectorAll(".nav").forEach(el=>el.classList.toggle("active",el.dataset.page===state.page));
   $("#githubDot").classList.toggle("ok",state.github.connected);$("#githubShort").textContent=state.github.connected?"GitHub connected":"GitHub not connected";
   $("#cloudDot").classList.toggle("ok",connectedLive());$("#cloudDot").classList.toggle("warn",!connectedLive()&&!!state.cloud);
   $("#cloudShort").textContent=connectedLive()?"Live bridge online":"Live bridge unavailable";
-  const pages={overview:drawOverview,console:drawConsole,workflows:drawWorkflows,files:drawFiles,settings:drawSettings,marketplace:drawMarketplace,backups:drawBackups,connections:drawConnections};
+  const pages={overview:drawOverview,console:drawConsole,workflows:drawWorkflows,files:drawFiles,players:drawPlayers,settings:drawSettings,marketplace:drawMarketplace,backups:drawBackups,connections:drawConnections};
   (pages[state.page]||drawOverview)();
   restoreDrafts();
   syncUpdateButton();
@@ -544,7 +547,7 @@ async function startApp(){
         phase:next.phase,memoryMiB:next.memoryMiB
       });
       if(state.page==="console")updateConsoleOutput();
-      if(changes&&["overview","connections"].includes(state.page)&&!editing())render();
+      if(changes&&["overview","connections","players"].includes(state.page)&&!editing())render();
       tickLiveUI();
     });
     await listen("paper-live-disconnected",()=>{
