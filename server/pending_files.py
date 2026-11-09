@@ -23,15 +23,36 @@ def safe_path(name):
     parts=Path(name).parts
     if Path(name).is_absolute() or any(p in ("",".","..") or p.startswith(".") for p in parts):
         raise ValueError("Unsafe staged path")
-    if any(p in FORBIDDEN or p=="world" or p.startswith("world_") for p in parts):
+    if any(p.lower() in FORBIDDEN or p.lower()=="world" or p.lower().startswith("world_") for p in parts):
         raise ValueError("World and player data cannot be staged")
-    if Path(name).name in PROTECTED or Path(name).suffix.lower() not in TEXT:
+    if Path(name).name.lower() in PROTECTED or Path(name).suffix.lower() not in TEXT:
         raise ValueError("Protected or non-text staged file")
     if len(parts)>2 and parts[0]=="plugins" and parts[1].lower()=="geyser-spigot" and parts[-1]=="config.yml":
         raise ValueError("Protected Geyser configuration")
     return name
 
-def apply_pending(data:Path,manifest:Path):
+
+def world_folders(data:Path, configured_properties:Path|None=None):
+    """Protect worlds even when the level-name is not literally 'world'."""
+    roots={"world","world_nether","world_the_end"}
+    for config in (Path(data)/"server.properties",configured_properties):
+        if config is None or not Path(config).is_file():
+            continue
+        for line in Path(config).read_text(encoding="utf-8").splitlines():
+            if not line.startswith("level-name="):
+                continue
+            name=line.split("=",1)[1].strip().lower()
+            if name and "/" not in name and "\\" not in name:
+                roots.update({name,name+"_nether",name+"_the_end"})
+    return roots
+
+
+def reject_world_path(data:Path, path:str, configured_properties:Path|None=None):
+    if path.split("/")[0].lower() in world_folders(data,configured_properties):
+        raise ValueError("World data cannot be staged")
+
+
+def apply_pending(data:Path,manifest:Path,configured_properties:Path|None=None):
     if not manifest.is_file():return 0
     changes=json.loads(manifest.read_text(encoding="utf-8"))
     if not isinstance(changes,dict) or len(changes)>250:
@@ -40,6 +61,7 @@ def apply_pending(data:Path,manifest:Path):
     verified=[]
     for name,value in changes.items():
         safe_path(name)
+        reject_world_path(data,name,configured_properties)
         if not isinstance(value,str) or "\0" in value or len(value.encode("utf-8"))>131072:
             raise ValueError("Invalid staged file contents")
         target=(data/name).resolve()
