@@ -235,9 +235,26 @@
       '</span></div>' + (pending ? '<button type="button" data-action="market-restart">Safely restart</button>' : '') + '</div>');
   }
 
+  function chooseManagedRelease(candidates,record){
+    if(!Array.isArray(candidates)||!candidates.length)return {unavailable:true};
+    const newest=candidates.find(v=>v.version_type==="release")||candidates[0];
+    const current=candidates.find(v=>v.id===record?.versionId);
+    if(current?.date_published&&newest.date_published){
+      const installedDate=Date.parse(current.date_published);
+      const nextDate=Date.parse(newest.date_published);
+      // Don't call an older compatible release an update.
+      if(Number.isFinite(installedDate)&&Number.isFinite(nextDate)&&nextDate<=installedDate){
+        return {...newest,id:record.versionId,upToDate:true};
+      }
+    }
+    if((newest.dependencies||[]).some(d=>d.dependency_type==="required")){
+      return {...newest,blocked:true};
+    }
+    return newest;
+  }
   function compatibleUpdate(id, record){
     const release=state.latestReleases[id];
-    if(!release||release.pending||release.unavailable||!release.id)return null;
+    if(!release||release.pending||release.unavailable||release.blocked||!release.id)return null;
     if(!record?.versionId||record.versionId===release.id)return null;
     return release;
   }
@@ -247,7 +264,7 @@
     const {installed={},pluginFiles=[],datapackFiles=[]}=state.inventory;
     const entries=Object.entries(installed).filter(([,entry])=>entry?.kind===state.kind);
     const queued=Object.entries(state.queued).filter(([,entry])=>entry?.kind===state.kind);
-    const actions=Object.entries(state.contentActions);
+    const actions=state.kind==="plugin"?Object.entries(state.contentActions):[];
     const updates=entries.filter(([id,entry])=>
       entry.enabled!==false&&!state.contentActions[id]&&compatibleUpdate(id,entry));
     const knownNames=new Set(entries.map(([id,entry])=>"modrinth-"+id+(entry.kind==="plugin"?".jar":".zip")));
@@ -307,6 +324,7 @@
     const stateLabel=action?'Queued '+action:
       pending?'Update queued':record.enabled===false?'Disabled':
       update?'Update available':checking?'Checking versions…':
+      latest?.blocked?'Required dependency missing':
       available?'Current version':'Version unavailable';
     const commands=record.kind==="plugin"?
       action?'<button type="button" class="btn small" data-market-action="cancel-content" data-id="'+escape(id)+'">Undo queued action</button>':
@@ -347,9 +365,7 @@
         state.latestReleases[id]={pending:true};
         try{
           const candidates=await invoke("modrinth_versions",{projectId:id,kind:entry.kind});
-          state.latestReleases[id]=Array.isArray(candidates)?
-            candidates.find(v=>v.version_type==="release")||candidates[0]||{unavailable:true}:
-            {unavailable:true};
+          state.latestReleases[id]=chooseManagedRelease(candidates,entry);
         }catch{state.latestReleases[id]={unavailable:true};}
         if(active())renderInstalledManager();
       }
