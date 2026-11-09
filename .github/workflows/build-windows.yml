@@ -8,6 +8,7 @@ on:
       - "desktop/**"
       - "tests/test_desktop_updater.mjs"
       - "tests/test_phase2_queue.mjs"
+      - "tests/test_phase2_management.mjs"
       - ".github/workflows/build-windows.yml"
 
 permissions:
@@ -53,6 +54,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/test_phase2_queue.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check desktop/ui/players.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tests/test_phase2_management.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --check desktop/ui/server_lifecycle.js
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/test_server_lifecycle.mjs
@@ -63,6 +68,8 @@ jobs:
         shell: pwsh
         run: |
           python -m unittest discover -s tests -p test_modrinth_marketplace.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p test_phase2_management.py -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run native Rust NetBird peer and connection regression tests
         working-directory: desktop/src-tauri
