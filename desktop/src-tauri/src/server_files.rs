@@ -406,3 +406,184 @@ async fn modrinth_queue_remove(project_id:String)->Result<Value,String>{
     }))).await?;
     Ok(json!({"removed":true,"projectId":project_id}))
 }
+
+
+// Phase 2: a versioned, limited manifest of one-shot file operations.
+// A receipt in the verified Paper snapshot prevents repeating a deletion or
+// rename every time GitHub Actions starts a new runner.
+const STAGED_OPERATIONS:&str="server/pending-operations.json";
+
+fn safe_operation_directory(path:&str)->bool{
+    if !valid_path(path) || path.split('/').count()>8{return false;}
+    let parts:Vec<String>=path.split('/').map(|s|s.to_ascii_lowercase()).collect();
+    if parts.iter().any(|part|part.starts_with('.')||part=="world"
+        ||part.starts_with("world_")||
+        ["playerdata","stats","advancements","cache","libraries","logs",
+         "crash-reports","plugins-disabled","floodgate"].contains(&part.as_str())){return false;}
+    if parts[0]=="plugins"&&parts.len()==1{return false;}
+    if parts[0]=="plugins"&&parts.iter().skip(1).any(|p|
+        p=="geyser-spigot"||p=="floodgate-spigot"){return false;}
+    true
+}
+fn validate_queued_operation(kind:&str,path:&str,target:Option<&str>)->Result<(),String>{
+    match kind {
+        "mkdir"=>{
+            if !safe_operation_directory(path)||target.is_some(){
+                return Err("Only safe non-world folders can be queued".into());
+            }
+        },
+        "delete"=>{
+            if !safe_server_file(path,true)||target.is_some(){
+                return Err("Only safe configuration text files can be deleted".into());
+            }
+        },
+        "rename"=>{
+            let target=target.ok_or("Select a new file name")?;
+            let source_parent=path.rsplit_once('/').map(|v|v.0).unwrap_or("");
+            let target_parent=target.rsplit_once('/').map(|v|v.0).unwrap_or("");
+            if !safe_server_file(path,true)||!safe_server_file(target,true)
+              ||path==target||source_parent!=target_parent{
+                return Err("Only safe text files can be renamed within the same folder".into());
+            }
+        },
+        _=>return Err("Unsupported offline file operation".into())
+    }
+    Ok(())
+}
+async fn pending_operations()->Result<(Value,String),String>{
+    let file=github(&format!("/contents/{STAGED_OPERATIONS}?ref=main"),
+        reqwest::Method::GET,None).await?;
+    let value=serde_json::from_str::<Value>(&decode_content(&file)?)
+        .map_err(|_|"Invalid queued operation manifest")?;
+    if value["version"]!=1||!value["operations"].is_array(){
+        return Err("Unsupported queued operation format".into())
+    }
+    let items=value["operations"].as_array().ok_or("Invalid operation entries")?;
+    if items.len()>100{return Err("Too many queued file operations".into())}
+    Ok((value,file["sha"].as_str().ok_or("Missing queued operations revision")?.to_owned()))
+}
+async fn update_operations(value:Value,sha:String,message:&str)->Result<(),String>{
+    let payload=serde_json::to_string_pretty(&value).map_err(|_|"Could not serialize operation queue")?;
+    if payload.len()>35000{return Err("Operation queue is too large".into())}
+    github(&format!("/contents/{STAGED_OPERATIONS}"),reqwest::Method::PUT,
+        Some(json!({"branch":"main","sha":sha,"message":message,
+        "content":encode_content(&(payload+"\n"))}))).await?;
+    Ok(())
+}
+#[tauri::command]
+async fn server_operations_list()->Result<Value,String>{
+    Ok(pending_operations().await?.0)
+}
+#[tauri::command]
+async fn server_operations_add(kind:String,path:String,target:Option<String>)->Result<Value,String>{
+    validate_queued_operation(&kind,&path,target.as_deref())?;
+    let (mut queue,sha)=pending_operations().await?;
+    let (edits,_)=pending_files().await?;
+    let contents=edits.as_object().ok_or("Invalid staged text queue")?;
+    if kind!="mkdir"&&(contents.contains_key(&path)
+       ||target.as_ref().is_some_and(|p|contents.contains_key(p))){
+        return Err("Discard the queued text edit before changing this file".into())
+    }
+    let items=queue["operations"].as_array_mut().ok_or("Invalid operation entries")?;
+    if items.len()>=100{return Err("Maximum of 100 staged file operations".into())}
+    if items.iter().any(|item|
+        item["path"]==path||target.as_ref().is_some_and(|p|item["target"]==*p)
+    ){return Err("A queued file operation already uses this path".into())}
+    let nanos=std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_|"System clock unavailable")?.as_nanos();
+    let id=format!("op-{:x}-{:x}",std::process::id(),nanos);
+    let entry=if let Some(target)=target{
+        json!({"id":id,"type":kind,"path":path,"target":target})
+    }else{
+        json!({"id":id,"type":kind,"path":path})
+    };
+    items.push(entry.clone());
+    update_operations(queue,sha,"Queue safe server file operation for next Paper session").await?;
+    Ok(entry)
+}
+#[tauri::command]
+async fn server_operations_remove(id:String)->Result<Value,String>{
+    if id.len()<12||id.len()>80||!id.chars().all(|c|
+        c.is_ascii_lowercase()||c.is_ascii_digit()||c=='-'){
+        return Err("Invalid queued operation ID".into())
+    }
+    let (mut queue,sha)=pending_operations().await?;
+    let items=queue["operations"].as_array_mut().ok_or("Invalid operations queue")?;
+    let before=items.len();
+    items.retain(|item|item["id"]!=id);
+    if items.len()==before{return Err("Queued operation already removed".into())}
+    update_operations(queue,sha,"Discard queued server file operation").await?;
+    Ok(json!({"removed":true,"id":id}))
+}
+// A unified queue includes file edits, one-shot operations, and Modrinth
+// installs. It reports only validated names and version metadata, not text
+// contents or private player data.
+#[tauri::command]
+async fn server_change_queue()->Result<Value,String>{
+    let (edits,operations,plugins)=tokio::try_join!(
+        pending_files(),pending_operations(),modrinth_queue_manifest()
+    )?;
+    let mut items=Vec::<Value>::new();
+    if let Some(map)=edits.0.as_object(){
+        for (path,content) in map {
+            if !safe_server_file(path,true){continue;}
+            let digest=format!("{:x}",Sha256::digest(content.as_str().unwrap_or("").as_bytes()));
+            items.push(json!({"kind":"edit","id":path,"path":path,"hash":digest}));
+        }
+    }
+    if let Some(ops)=operations.0["operations"].as_array(){
+        for op in ops {
+            let kind=op["type"].as_str().unwrap_or("");
+            let path=op["path"].as_str().unwrap_or("");
+            if validate_queued_operation(kind,path,op["target"].as_str()).is_ok(){
+                items.push(json!({"kind":kind,"id":op["id"],
+                    "path":path,"target":op["target"]}));
+            }
+        }
+    }
+    if let Some(map)=plugins.0.as_object(){
+        for (id,record) in map{
+            let kind=record["kind"].as_str().unwrap_or("");
+            if ["plugin","datapack"].contains(&kind){
+                items.push(json!({"kind":kind,"id":id,
+                    "title":record["title"],"versionId":record["versionId"]}));
+            }
+        }
+    }
+    Ok(json!({"items":items,"count":items.len()}))
+}
+fn backup_queue_receipts(snapshot:&std::path::Path)->Result<Value,String>{
+    let file=std::fs::File::open(snapshot).map_err(|_|"Cannot open verified backup")?;
+    let mut zip=zip::ZipArchive::new(file).map_err(|_|"Invalid verified backup")?;
+    let mut result=json!({"operations":{},"edits":{},"installed":{}});
+    for (name,key) in [
+        (".cloud-applied-ops.json","operations"),
+        (".cloud-applied-edits.json","edits"),
+        ("plugins/.modrinth-installed.json","installed")
+    ]{
+        if let Ok(mut entry)=zip.by_name(name){
+            if entry.size()>131072{continue;}
+            let mut content=String::new();
+            if entry.read_to_string(&mut content).is_ok(){
+                if let Ok(value)=serde_json::from_str::<Value>(&content){
+                    if value.is_object(){result[key]=value;}
+                }
+            }
+        }
+    }
+    Ok(result)
+}
+#[tauri::command]
+async fn server_change_receipts(live:bool,running:bool)->Result<Value,String>{
+    if live{
+        let response=direct_request("command",
+            Some(json!({"type":"file-queue-receipts","args":{}}))).await?;
+        if response["ok"]!=true{return Err("Could not read applied queue status".into())}
+        return Ok(response["result"].clone())
+    }
+    if running{return Err("The live server is unreachable. Applied status is unknown until its next verified backup.".into())}
+    let (_,backup)=verified_backup().await?;
+    tokio::task::spawn_blocking(move||backup_queue_receipts(backup.as_path()))
+        .await.map_err(|_|"Backup queue status could not be read")?
+}
