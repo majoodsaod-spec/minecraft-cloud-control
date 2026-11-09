@@ -25,3 +25,8 @@ nav{display:grid;gap:4px}.nav{display:flex;align-items:center;gap:13px;border:0;
 .run-icon.cancelled{background:#eef1f4;color:#85919c}
 .run-icon.neutral{background:#eef1f4;color:#85919c}
 .run-status.cancelled,.run-status.neutral{background:#eef1f4;color:#74828e}
+
+/* Phase 3 runtime resource history: lightweight SVG, no chart dependency. */
+.resource-chart{display:block;width:100%;height:auto;max-height:160px;margin:12px 0 9px;overflow:visible}
+.metric-legend{display:flex;gap:18px;flex-wrap:wrap;color:#16886b;font-size:11px;font-weight:650}
+.metric-legend span:nth-child(2){color:#6e85c6}
