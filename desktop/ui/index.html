@@ -39,6 +39,11 @@
       <div class="breadcrumb"><span>Minecraft Cloud</span><b>/</b><strong id="breadcrumb">Overview</strong></div>
       <div class="topbar-right"><span class="live-time" id="time"></span><button class="btn small flat quick-update-control" id="quickUpdate" data-action="check-update" title="Check GitHub for a newer Minecraft Cloud Windows app"><span id="updateIndicator" class="update-indicator" hidden></span><span id="quickUpdateLabel">Quick Update</span></button><span id="updateStatus" role="status" aria-live="polite" class="update-status"></span><button id="refresh" class="icon-btn" title="Refresh data" aria-label="Refresh">↻</button></div>
     </header>
+    <section id="serverOperation" class="server-operation" role="status" aria-live="polite" hidden>
+      <div class="server-operation-top"><strong id="serverOperationTitle">Server operation</strong><span id="serverOperationStep">Checking status</span></div>
+      <div class="server-operation-stages" id="serverOperationStages"></div>
+      <div class="server-operation-bottom"><span id="serverOperationDetail">Waiting for the next confirmed phase</span><span id="serverOperationSource">Paper / GitHub</span></div>
+    </section>
     <div id="content" class="content"></div>
     <footer class="footer"><span id="footerText">Server management</span><span id="footerVersion">Minecraft Cloud · Windows</span></footer>
   </main>
