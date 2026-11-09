@@ -33,21 +33,29 @@ class PaperMetrics:
         if not isinstance(raw, str):
             return
         line = MINECRAFT_COLOR.sub("", ANSI.sub("", raw))
+        # Ignore arbitrary chat text; only inspect the beginning of a
+        # console output message after the optional Paper log prefix.
+        if "]:" in line:
+            line = line.rsplit("]:", 1)[1].strip()
+        else:
+            line = line.strip()
+        if line.startswith("<") or line.startswith("[Not Secure] <"):
+            return
         now = time.monotonic()
         with self.lock:
-            tps_match = TPS.search(line)
+            tps_match = TPS.match(line)
             if tps_match:
                 value = float(tps_match.group(1))
                 if 0 <= value <= 20.5:
                     self.tps = round(value, 2)
                     self.tps_at = now
-            mspt_match = MSPT.search(line)
+            mspt_match = MSPT.match(line)
             if mspt_match:
                 value = float(mspt_match.group(1))
                 if 0 <= value <= 100000:
                     self.mspt = round(value, 2)
                     self.mspt_at = now
-            if TICK_HEADER.search(line):
+            if TICK_HEADER.match(line):
                 self._expect_triples = 3
                 return
             if self._expect_triples:
