@@ -390,7 +390,7 @@ async function loadHistoricalMetrics(){
 }
 function resourceHistory(){
   const points=state.metricHistory;
-  if(points.length<2)return panel("Resource history",'<p class="field-tip">Collecting live samples. A chart appears after at least two readings; history resets when Paper restarts.</p>');
+  if(points.length<2)return panel("Resource history",'<p class="field-tip">Collecting genuine performance readings. The chart appears after at least two samples.</p>'+btn("Run 60-second Spark profile","spark-profile","small flat",!connectedLive()));
   const line=(field,max)=>points.map((item,i)=>{
     const x=Number((12+i*576/(points.length-1)).toFixed(2));
     const y=Number((106-Math.min(max,item[field])*90/max).toFixed(2));
@@ -409,7 +409,9 @@ function resourceHistory(){
       <path d="${line("cpu",400)}" fill="none" stroke="#16886b" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
       <path d="${line("memory",100)}" fill="none" stroke="#6e85c6" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
     </svg><div class="list-stat"><span>Resource check</span><strong>${esc(pressure)}</strong></div>
-    <p class="field-tip">Recent live samples and up to two hours of saved history; CPU may exceed 100% on multicore runners. Disk readings describe temporary runner space, not stored world backups.</p>`);
+    <p class="field-tip">Recent live samples and up to two hours of saved history; CPU may exceed 100% on multicore runners. Disk readings describe temporary runner space, not stored world backups.</p>
+    ${btn("Run 60-second Spark profile","spark-profile","small flat",!connectedLive())}
+    <p class="field-tip">On-demand profiling may briefly add overhead. After 60 seconds, open Live Console for the Spark report URL.</p>`);
 }
 function drawOverview(){
   const main=latestServerRun(),live=currentPaper(),online=connectedLive();
@@ -685,6 +687,16 @@ async function action(type,id){
   switch(type){
   case "refresh":return refresh();
   case "check-update":return quickUpdate();
+  case "spark-profile":{
+    if(!connectedLive())return flash("Connect to Paper before running diagnostics.");
+    if(!await dialog("Profile Paper for 60 seconds?","This runs the Spark profiler on the live server for one minute. It may add slight load; the report appears in Live Console."))return;
+    try{
+      const result=await sendPaper("console",{command:"spark profiler start --timeout 60"});
+      if(result?.ok===false)throw Error(result?.error||"Paper rejected the command");
+      flash("Spark profiling requested. Check Live Console after one minute for the report.");
+    }catch(error){flash("Could not start Spark: "+errorText(error));}
+    return;
+  }
   case "market-restart":{
     if(!connectedLive())return flash("Server must be connected to restart safely.");
     if(!await dialog("Safely restart Paper?","Players will be kicked, the world saved and backed up, and the server restarted to load your newly installed plugins."))return;
