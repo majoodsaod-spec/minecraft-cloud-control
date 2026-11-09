@@ -8,8 +8,9 @@ on:
         required: false
         type: string
   schedule:
-    # Recovery check every day, including across month boundaries (30-day continuity).
-    - cron: "17 3 * * *"
+    # Bounded recovery checks: a broken handoff can recover within a few hours,
+    # without a new runner every few minutes. Failed unbacked sessions are blocked.
+    - cron: "17 */2 * * *"
 
 permissions:
   contents: read
@@ -66,6 +67,12 @@ jobs:
           if [[ -z "$run_id" ]]; then
             run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=minecraft-world&per_page=100" \
               --jq '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | reverse | .[0].workflow_run.id // empty')
+          fi
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            if ! python server/recovery_gate.py --backup-run "$run_id"; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
           if [[ -n "$run_id" ]]; then
             echo "Restoring snapshot from GitHub run $run_id"
@@ -128,11 +135,23 @@ jobs:
             echo "::warning::NetBird installation unavailable; starting Paper normally."
             exit 0
           fi
-          if ! sudo netbird up --setup-key "$NETBIRD_SETUP_KEY" --hostname "minecraft-paper-$GITHUB_RUN_ID" >/dev/null 2>&1; then
-            echo "::warning::NetBird connection failed; starting Paper normally."
+          private_ip=""
+          for attempt in 1 2 3; do
+            # Avoid blocking server startup indefinitely on an optional VPN.
+            if timeout 50s sudo netbird up --setup-key "$NETBIRD_SETUP_KEY" --hostname "minecraft-paper-$GITHUB_RUN_ID" >/dev/null 2>&1; then
+              private_ip="$(sudo netbird status --ipv4 2>/dev/null | tr -d '\r\n' | cut -d/ -f1)"
+              if python -c 'import ipaddress,sys; ip=ipaddress.ip_address(sys.argv[1]); sys.exit(not(ip.version==4 and ip in ipaddress.ip_network("100.64.0.0/10")))' "$private_ip" 2>/dev/null; then
+                break
+              fi
+            fi
+            private_ip=""
+            echo "::warning::NetBird attempt $attempt/3 not ready; retrying optional private connection."
+            [[ "$attempt" == 3 ]] || sleep 4
+          done
+          if [[ -z "$private_ip" ]]; then
+            echo "::warning::NetBird unavailable after bounded retries; Paper will start without private control."
             exit 0
           fi
-          private_ip="$(sudo netbird status --ipv4 2>/dev/null | tr -d '\r\n' | cut -d/ -f1)"
           if ! python -c 'import ipaddress,sys; ip=ipaddress.ip_address(sys.argv[1]); sys.exit(not(ip.version==4 and ip in ipaddress.ip_network("100.64.0.0/10")))' "$private_ip"; then
             # Strict IP validation happens again in Python's direct control.
             echo "::warning::NetBird private IP not ready; live direct control unavailable."
@@ -165,6 +184,7 @@ jobs:
             cycle-output/worlds.zip
             cycle-output/worlds.zip.sha256
             cycle-output/stop-requested
+            cycle-output/lifecycle-report.json
           retention-days: 90
           if-no-files-found: error
       - name: Confirm saved and stopped
@@ -185,6 +205,19 @@ jobs:
         if: success() && steps.power.outputs.enabled == 'true' && steps.select.outputs.skip != 'true'
         run: echo "ready=true" >> "$GITHUB_OUTPUT"
         id: backedup
+      - name: Summarize Paper lifecycle and failure phase
+        if: always()
+        shell: bash
+        run: |
+          python -c 'from pathlib import Path; from server.reliability import markdown_summary; print(markdown_summary(Path("cycle-output/lifecycle-report.json")))' >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve safe diagnostics when startup fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-startup-diagnostics-${{ github.run_id }}
+          path: cycle-output/lifecycle-report.json
+          if-no-files-found: ignore
+          retention-days: 7
 
   next_session:
     needs: minecraft
@@ -209,9 +242,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh workflow run paper-state-test.yml --repo "$GITHUB_REPOSITORY" \
-            --ref "${GITHUB_REF_NAME}" -f previous_run="$GITHUB_RUN_ID"
-          echo "Successor run dispatched with backup from $GITHUB_RUN_ID"
+          python server/handoff.py --run-id "$GITHUB_RUN_ID" --branch "$GITHUB_REF_NAME"
 
   cleanup_backups:
     needs: minecraft
