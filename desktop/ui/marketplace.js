@@ -124,11 +124,11 @@
   function detailBody(raw){
     // Basic safe Markdown presentation: no raw HTML, scripts, embeds or remote
     // markdown links. Preserve explanatory text and list structure.
-    return String(raw||"").slice(0,50000).split(/\\r?\\n/).map(line=>{
+    return String(raw||"").slice(0,50000).split(/\r?\n/).map(line=>{
       const text=escape(line);
-      if(/^###?\\s+/.test(line))return '<h3>'+text.replace(/^#{2,3}\\s+/,"")+'</h3>';
-      if(/^#\\s+/.test(line))return '<h2>'+text.replace(/^#\\s+/,"")+'</h2>';
-      if(/^[-*]\\s+/.test(line))return '<p class="mc-detail-bullet">• '+text.slice(2)+'</p>';
+      if(/^###?\s+/.test(line))return '<h3>'+text.replace(/^#{2,3}\s+/,"")+'</h3>';
+      if(/^#\s+/.test(line))return '<h2>'+text.replace(/^#\s+/,"")+'</h2>';
+      if(/^[-*]\s+/.test(line))return '<p class="mc-detail-bullet">• '+text.slice(2)+'</p>';
       return line.trim()?'<p>'+text+'</p>':'<div class="mc-detail-space"></div>';
     }).join("");
   }
@@ -530,8 +530,8 @@
     try{
       await invoke("modrinth_queue_remove",{projectId});
       delete state.queued[projectId];
-      renderInstalled();renderResults();renderInstalledManager();
-      status("Queued install removed.",false);
+      renderInstalled();renderResults();renderInstalledManager();renderDetail();
+      status("Queued install cancelled. No plugin files were changed.",false);
     }catch(e){status("Could not remove queued install: "+String(e).slice(0,150),true)}
   }
   async function ensureInventoryLoaded(force=false){
@@ -609,44 +609,40 @@
     search();
   }
   async function install(projectId) {
-    if (state.installing) return;
-    if(state.queued[projectId])return status("This project is queued. Use × to remove it before choosing another release.",false);
-    if (state.version !== "26.3") return status("Select version 26.3 to install onto this server.", true);
-    const candidate = state.hits.find(x => x.project_id === projectId);
-    if (!candidate) return;
-    state.installing = projectId;
-    status(state.online ? "Checking and installing " + candidate.title + "…" : "Checking and queuing " + candidate.title + " for next startup…", false);
-    renderResults();
-    try {
-      const versionsFound = await invoke("modrinth_versions", { projectId, kind: state.kind });
-      if (!Array.isArray(versionsFound) || !versionsFound.length)
-        throw Error("No verified Paper 26.3 release is available.");
-      const version = versionsFound.find(v => v.version_type === "release") || versionsFound[0];
-      if (!state.online) {
-        await invoke("modrinth_queue_add",{projectId,versionId:version.id,kind:state.kind,title:candidate.title||projectId});
-        state.queued[projectId]={versionId:version.id,kind:state.kind,title:candidate.title||projectId};
-        status(candidate.title+" queued. It will download directly to Paper after the next verified world restore.", false);
-        renderInstalled();
+    if(state.installing||!projectIdOk(projectId))return;
+    if(state.queued[projectId])return unqueue(projectId);
+    if(state.version!=="26.3")return status("Select version 26.3 to install onto this server.",true);
+    if(state.contentActions[projectId]==="remove")
+      return status("Cancel the queued removal before installing again.",true);
+    const candidate=state.hits.find(x=>x.project_id===projectId);
+    const managed=state.inventory.installed?.[projectId];
+    const title=candidate?.title||state.detailInfo?.title||managed?.title||projectId;
+    if(managed&&!state.latestReleases[projectId]?.id)
+      return status("Installed project version is still being checked.",true);
+    const kind=state.detailId===projectId?state.detailKind:managed?.kind||state.kind;
+    state.installing=projectId;
+    status("Checking compatible Paper 26.3 release for "+title+"…",false);
+    renderResults();renderDetail();
+    try{
+      const versionsFound=await invoke("modrinth_versions",{projectId,kind});
+      if(!Array.isArray(versionsFound)||!versionsFound.length)
+        throw Error("No verified compatible Paper 26.3 release is available.");
+      const version=versionsFound.find(v=>v.version_type==="release")||versionsFound[0];
+      if((version.dependencies||[]).some(d=>d.dependency_type==="required"))
+        throw Error("This version has required dependencies. Install them before queuing.");
+      if(managed?.versionId===version.id){
+        status("This release is already installed.",false);
         return;
       }
-      const answer = await invoke("direct_command", { kind: "marketplace-install",
-        args: { projectId, versionId: version.id, kind: state.kind } });
-      if (!answer || !answer.ok || !answer.result || !answer.result.installed)
-        throw Error("The server did not confirm installation.");
-      const result = answer.result;
-      state.installed = state.installed.filter(x => x.projectId !== projectId);
-      state.installed.push({ ...result, projectId });
-      state.inventory.installed[projectId]={versionId:version.id,kind:state.kind,version:version.version_number,title:candidate.title};
-      state.latestReleases[projectId]=version;
-      status(result.name + (result.restartRequired ?
-        " installed successfully. Use Safe Restart to activate this plugin." :
-        " installed successfully. Datapack reload requested."), false);
-      renderInstalled();
-    } catch (error) {
-      status("Installation failed: " + String(error).replace(/^Error:\s*/, "").slice(0, 220), true);
-    } finally {
-      state.installing = "";
-      renderResults();
+      await invoke("modrinth_queue_add",{projectId,versionId:version.id,kind,title});
+      state.queued[projectId]={versionId:version.id,kind,title};
+      status(title+" queued for next safe server startup. Select Cancel to undo.",false);
+      renderInstalled();renderInstalledManager();
+    }catch(error){
+      status("Could not queue install: "+String(error).replace(/^Error:\s*/,"").slice(0,220),true);
+    }finally{
+      state.installing="";
+      renderResults();renderDetail();
     }
   }
 
