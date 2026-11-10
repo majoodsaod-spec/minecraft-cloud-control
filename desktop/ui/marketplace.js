@@ -453,7 +453,7 @@
       const actions=await invoke("modrinth_content_actions_list");
       state.contentActions=actions&&typeof actions==="object"?actions:{};
       state.actionsLoaded=true;
-      if(active())renderInstalledManager();
+      if(active()){renderInstalledManager();renderDetail();}
     }catch(error){status("Could not load queued plugin actions: "+String(error).slice(0,140),true);}
     finally{state.actionBusy=false;}
   }
@@ -531,7 +531,7 @@
       const queued=await invoke("modrinth_queue_list");
       state.queued=queued&&typeof queued==="object"?queued:{};
       state.queueLoaded=true;
-      if(active()){renderInstalled();renderResults();renderInstalledManager();}
+      if(active()){renderInstalled();renderResults();renderInstalledManager();renderDetail();}
     }catch(e){status("Could not load pending installs: "+String(e).slice(0,150),true)}
     finally{state.queueBusy=false;}
   }
@@ -673,7 +673,7 @@
       state.unmanagedName=el.dataset.name||null;state.detailId=null;state.detailEpoch++;render(state.online);return;
     }
     if (action === "search-unmanaged") {
-      const query=state.unmanagedName?.replace(/\\.(jar|zip)$/i,"").replace(/[-_]/g," ")||"";
+      const query=state.unmanagedName?.replace(/\.(jar|zip)$/i,"").replace(/[-_]/g," ")||"";
       closeDetail();state.tab="browse";state.query=query.slice(0,100);state.page=0;state.loaded=false;
       render(state.online);search();return;
     }
