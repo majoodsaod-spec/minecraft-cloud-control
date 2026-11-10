@@ -1146,6 +1146,32 @@ async fn modrinth_search(
     response.json().await.map_err(|_|"Invalid Modrinth search results".into())
 }
 #[tauri::command]
+async fn modrinth_project(project_id: String) -> Result<Value, String> {
+    // Project IDs are untrusted WebView input. Restrict before interpolating
+    // into the fixed Modrinth URL; never allow arbitrary URLs from the UI.
+    if project_id.len()<3 || project_id.len()>32 ||
+       !project_id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("Invalid Modrinth project ID".into());
+    }
+    let response=http().get(format!("https://api.modrinth.com/v2/project/{project_id}"))
+        .send().await.map_err(|_|"Modrinth project details are unavailable".to_owned())?;
+    if !response.status().is_success(){
+        return Err(format!("Modrinth project HTTP {}",response.status().as_u16()));
+    }
+    let details=response.json::<Value>().await.map_err(|_|"Invalid Modrinth project details".to_owned())?;
+    if details["id"].as_str()!=Some(project_id.as_str()) {
+        return Err("Modrinth returned a mismatched project".into());
+    }
+    Ok(json!({
+        "id":details["id"],"slug":details["slug"],"title":details["title"],
+        "description":details["description"],"body":details["body"],
+        "icon_url":details["icon_url"],"gallery":details["gallery"],
+        "categories":details["categories"],"downloads":details["downloads"],
+        "followers":details["followers"],"updated":details["updated"],
+        "project_type":details["project_type"],"license":details["license"]
+    }))
+}
+#[tauri::command]
 async fn modrinth_versions(project_id: String, kind: String) -> Result<Value, String> {
     if project_id.len()<3 || project_id.len()>32 ||
        !project_id.chars().all(|c| c.is_ascii_alphanumeric()) ||
@@ -1220,7 +1246,7 @@ pub fn run() {
             configure_cloudflare,cloudflare_status,cloudflare_command,cloudflare_console,
             server_restore_backup,
             direct_configure,direct_peer_config,direct_clear_peer,direct_status,direct_start_stream,direct_command,
-            modrinth_search,modrinth_versions,
+            modrinth_search,modrinth_versions,modrinth_project,
             netbird_auto_status,netbird_set_auto
         ])
         .build(tauri::generate_context!())
