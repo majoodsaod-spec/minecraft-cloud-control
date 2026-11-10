@@ -111,6 +111,94 @@
       '</div></div></article>';
   }
 
+  // Project pages are rendered entirely inside the WebView. External metadata
+  // is treated as plain text, not executable HTML from a remote project.
+  const projectIdOk=id=>typeof id==="string"&&/^[A-Za-z0-9]{3,32}$/.test(id);
+  const projectSummary=()=>{
+    const found=state.hits.find(item=>item.project_id===state.detailId);
+    const managed=state.inventory.installed?.[state.detailId];
+    return {title:managed?.title||found?.title||state.detailId,
+      description:found?.description||"",author:found?.author||"",
+      downloads:found?.downloads||0,icon_url:found?.icon_url||""};
+  };
+  function detailBody(raw){
+    // Basic safe Markdown presentation: no raw HTML, scripts, embeds or remote
+    // markdown links. Preserve explanatory text and list structure.
+    return String(raw||"").slice(0,50000).split(/\\r?\\n/).map(line=>{
+      const text=escape(line);
+      if(/^###?\\s+/.test(line))return '<h3>'+text.replace(/^#{2,3}\\s+/,"")+'</h3>';
+      if(/^#\\s+/.test(line))return '<h2>'+text.replace(/^#\\s+/,"")+'</h2>';
+      if(/^[-*]\\s+/.test(line))return '<p class="mc-detail-bullet">• '+text.slice(2)+'</p>';
+      return line.trim()?'<p>'+text+'</p>':'<div class="mc-detail-space"></div>';
+    }).join("");
+  }
+  function renderDetail(){
+    const area=document.getElementById("mc-project-detail");
+    if(!area)return;
+    if(!state.detailId){area.innerHTML="";area.hidden=true;return;}
+    area.hidden=false;
+    const info=state.detailInfo||{},summary=projectSummary();
+    const name=escape(info.title||summary.title||"Project");
+    const id=escape(state.detailId);
+    const queued=state.queued[state.detailId];
+    const record=state.inventory.installed?.[state.detailId];
+    const removing=state.contentActions[state.detailId]==="remove";
+    const busy=state.installing===state.detailId;
+    const installed=Boolean(record&&!removing);
+    const canQueue=state.detailKind===state.kind&&state.version==="26.3";
+    const label=busy?"Processing…":queued?"Cancel":installed?"Installed":removing?"Removal queued":"Install";
+    const action=queued?"unqueue":"install";
+    const disabled=busy||(!queued&&(installed||removing||!canQueue||Boolean(state.installing)));
+    const icon=trustedIcon(info.icon_url||summary.icon_url);
+    const description=info.body||info.description||summary.description||"No project description available.";
+    const gallery=Array.isArray(info.gallery)?info.gallery.filter(g=>trustedIcon(g?.url)).slice(0,4):[];
+    area.innerHTML='<button class="mc-detail-back" type="button" data-market-action="back-details">← Back</button>'+
+      '<div class="mc-detail-hero"><div class="mc-detail-identity">'+
+      (icon?'<img class="mc-detail-icon" src="'+escape(icon)+'" alt="">':'<span class="mc-detail-icon mc-detail-fallback">⬡</span>')+
+      '<div><div class="mc-detail-eyebrow">Modrinth · '+escape(state.detailKind==="plugin"?"Plugin":"Data pack")+'</div>'+
+      '<h2>'+name+'</h2><p>'+escape(info.description||summary.description||"")+'</p></div></div>'+
+      '<div class="mc-detail-actions"><button type="button" class="mc-discover-install" data-market-action="'+action+'" data-id="'+id+'" '+(disabled?"disabled":"")+'>'+label+'</button>'+
+      (removing?'<button type="button" class="btn small" data-market-action="cancel-content" data-id="'+id+'">Cancel removal</button>':"")+'</div></div>'+
+      '<div class="mc-detail-layout"><section class="mc-detail-body"><h3>About this project</h3>'+
+      (state.detailLoading?'<p>Loading full project description…</p>':
+        state.detailError?'<p>'+escape(state.detailError)+'</p>'+detailBody(summary.description):
+        detailBody(description))+
+      (gallery.length?'<div class="mc-detail-gallery">'+gallery.map(g=>'<img src="'+escape(g.url)+'" alt="'+escape(g.title||"Project screenshot")+'" loading="lazy">').join("")+'</div>':"")+
+      '</section><aside class="mc-detail-sidebar"><h3>Project information</h3>'+
+      '<p>Compatibility: Paper 26.3</p>'+
+      '<p>Downloads: '+compact(info.downloads??summary.downloads)+'</p>'+
+      '<p>License: '+escape(info.license?.id||"See Modrinth")+'</p>'+
+      (queued?'<p class="mc-detail-queued">Install queued for next startup. Select Cancel to remove it.</p>':
+        installed?'<p class="mc-detail-queued">Installed on this server.</p>':
+        removing?'<p>Removal is waiting for the next safe restart.</p>':'<p>Install will be queued for the next safe Paper startup.</p>')+
+      '</aside></div>';
+  }
+  async function openDetail(id,kind){
+    if(!projectIdOk(id)||!["plugin","datapack"].includes(kind))return;
+    state.kind=kind;
+    state.detailId=id;state.detailKind=kind;state.detailInfo=null;state.detailError="";
+    state.detailLoading=true;
+    const epoch=++state.detailEpoch;
+    render(state.online);
+    try{
+      const info=await invoke("modrinth_project",{projectId:id});
+      if(epoch!==state.detailEpoch||state.detailId!==id)return;
+      state.detailInfo=info&&typeof info==="object"?info:null;
+    }catch(error){
+      if(epoch!==state.detailEpoch||state.detailId!==id)return;
+      state.detailError="Full details unavailable: "+String(error).slice(0,140);
+    }finally{
+      if(epoch===state.detailEpoch&&state.detailId===id){
+        state.detailLoading=false;
+        renderDetail();
+      }
+    }
+  }
+  function closeDetail(){
+    state.detailId=null;state.detailKind=null;state.detailInfo=null;state.detailLoading=false;
+    state.detailEpoch++;
+    render(state.online);
+  }
   function renderResults() {
     const list = document.getElementById("mc-market-results");
     if (!list) return;
@@ -194,8 +282,8 @@
           '" role="tab" aria-selected="'+(state.tab===key)+'" class="'+(state.tab===key?"active":"")+'">'+label+'</button>').join("")+
       '</div>'+
       '<section id="mc-installed-manager" class="mc-installed-manager" '+
-        (state.tab==="browse"?'hidden':'')+'></section>'+
-      '<div class="mc-discover-layout" '+(state.tab==="browse"?'':'style="display:none"')+'>' + filters() + '<div class="mc-discover-primary">' +
+        (state.tab==="browse"||state.detailId?'hidden':'')+'></section>'+
+      '<div class="mc-discover-layout" '+(state.tab==="browse"&&!state.detailId?'':'style="display:none"')+'>' + filters() + '<div class="mc-discover-primary">' +
       '<form id="mc-market-search-form" class="mc-discover-search"><span>⌕</span>' +
       '<input id="mc-market-query" type="search" autocomplete="off" placeholder="Search ' +
       (state.kind === "plugin" ? "plugins" : "datapacks") + '…" value="' + escape(state.query) +
@@ -213,12 +301,13 @@
       '<div id="mc-market-results" class="mc-discover-list"></div>' +
       '<div class="mc-discover-pagination"><button type="button" id="mc-market-prev" data-market-action="previous">← Previous</button>' +
       '<button type="button" id="mc-market-next" data-market-action="next">Next →</button></div>' +
-      '</div></div></section>';
+      '</div></div><section id="mc-project-detail" class="mc-project-detail" hidden></section></section>';
     const slot = document.getElementById("mc-market-status");
     if (slot) slot.classList.toggle("is-error", state.error);
     renderInstalled();
     renderResults();
     renderInstalledManager();
+    renderDetail();
     ensureQueueLoaded();
     ensureContentActionsLoaded();
     ensureInventoryLoaded();
@@ -574,10 +663,12 @@
       state.epoch++; state.loaded = false;
       render(state.online); search();
     }
+    if (action === "details") {openDetail(el.dataset.id,el.dataset.kind||state.kind);return;}
+    if (action === "back-details") {closeDetail();return;}
     if (action === "install") install(el.dataset.id);
     if (action === "unqueue") unqueue(el.dataset.id);
     if (action === "refresh-installed"){state.latestReleases={};ensureInventoryLoaded(true);}
-    if (action === "tab"){state.tab=value;render(state.online);if(value!=="browse")loadManagedReleases();return;}
+    if (action === "tab"){state.detailId=null;state.detailInfo=null;state.detailEpoch++;state.tab=value;render(state.online);if(value!=="browse")loadManagedReleases();return;}
     if (action === "update-installed") queueInstalledUpdate(el.dataset.id).catch(e=>status("Could not queue update: "+String(e).slice(0,160),true));
     if (action === "update-all") updateAll();
     if (action === "content-action") setContentAction(el.dataset.id,value);
