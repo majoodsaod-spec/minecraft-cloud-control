@@ -793,11 +793,9 @@
         if(!window.confirm("Queue "+batch.length+" verified projects together?\\n\\n"+
           details+"\\n\\nThey apply on the next safe server startup."))return;
       }
-      if(batch.length>1){
-        await invoke("modrinth_queue_batch",{items:batch,rootId:projectId});
-      }else{
-        await invoke("modrinth_queue_add",{projectId,versionId:version.id,kind,title});
-      }
+      // The batch endpoint validates dependencies even when all required
+      // projects are already installed, whereas legacy single-add rejects them.
+      await invoke("modrinth_queue_batch",{items:batch,rootId:projectId});
       for(const item of batch){
         state.queued[item.projectId]={versionId:item.versionId,kind:item.kind,title:item.title};
       }
