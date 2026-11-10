@@ -1239,7 +1239,7 @@ pub fn run() {
             server_change_queue,server_change_receipts,
             server_files_list,server_files_read,server_settings_get,server_settings_save,
             server_players_snapshot,
-            modrinth_queue_list,modrinth_queue_add,modrinth_queue_remove,
+            modrinth_queue_list,modrinth_queue_add,modrinth_queue_batch,modrinth_queue_remove,
             modrinth_content_actions_list,modrinth_content_action_set,modrinth_content_action_remove,
             modrinth_installed_inventory,
             desktop_check_update,desktop_install_update,
