@@ -38,6 +38,7 @@
     installedSearch:"",installedFilter:"all",installedSort:"name",
     sortTouched: false,
     detailId:null,detailKind:null,detailInfo:null,detailError:"",detailLoading:false,detailEpoch:0,unmanagedName:null,
+    detailVersions:[],selectedVersions:{},detailsVersionsLoading:false,
     online: false, epoch: 0, searchTimer: null
   };
   const root = () => document.getElementById("mc-marketplace");
@@ -159,9 +160,12 @@
     const canQueue=state.detailKind===state.kind&&state.version==="26.3";
     const label=busy?"Processing…":queued?"Cancel":installed?"Installed":removing?"Removal queued":"Install";
     const action=queued?"unqueue":"install";
-    const disabled=busy||(!queued&&(installed||removing||!canQueue||Boolean(state.installing)));
+    const disabled=busy||(!queued&&(installed||removing||!canQueue||Boolean(state.installing)||!selected||required.length>0));
     const icon=trustedIcon(info.icon_url||summary.icon_url);
     const description=info.body||info.description||summary.description||"No project description available.";
+    const versions=state.detailVersions;
+    const selected=versions.find(v=>v.id===state.selectedVersions[state.detailId])||versions[0];
+    const required=(selected?.dependencies||[]).filter(d=>d.dependency_type==="required");
     const gallery=Array.isArray(info.gallery)?info.gallery.filter(g=>trustedIcon(g?.url)).slice(0,4):[];
     area.innerHTML='<button class="mc-detail-back" type="button" data-market-action="back-details">← Back</button>'+
       '<div class="mc-detail-hero"><div class="mc-detail-identity">'+
@@ -178,7 +182,17 @@
       '</section><aside class="mc-detail-sidebar"><h3>Project information</h3>'+
       '<p>Compatibility: Paper 26.3</p>'+
       '<p>Downloads: '+compact(info.downloads??summary.downloads)+'</p>'+
-      '<p>License: '+escape(info.license?.id||"See Modrinth")+'</p>'+
+      '<p>License: '+escape(info.license?.id||"See Modrinth")+'</p>'+ 
+      '<h3>Compatible releases</h3>'+
+      (state.detailsVersionsLoading?'<p>Checking Paper releases…</p>':versions.length?
+        '<select id="mc-detail-version" aria-label="Choose compatible release">'+versions.map(v=>
+          '<option value="'+escape(v.id)+'" '+(selected?.id===v.id?'selected':'')+'>'+escape(v.version_number||v.name||v.id)+
+          ' · '+escape(v.version_type||"release")+'</option>').join("")+'</select>':
+        '<p>No verified Paper 26.3 release available.</p>')+
+      (required.length?'<h3>Required dependencies</h3><div class="mc-required-deps">'+required.map(d=>
+        '<p>'+escape(d.project_id||d.version_id||"Unspecified dependency")+
+        (d.project_id?'<button type="button" class="btn small flat" data-market-action="dependency" data-id="'+escape(d.project_id)+'">View</button>':'')+'</p>').join("")+'</div>'+ 
+        '<p class="mc-detail-warning">This release cannot be queued until required dependencies are resolved and verified.</p>':"")+
       (queued?'<p class="mc-detail-queued">Install queued for next startup. Select Cancel to remove it.</p>':
         installed?'<p class="mc-detail-queued">Installed on this server.</p>':
         removing?'<p>Removal is waiting for the next safe restart.</p>':'<p>Install will be queued for the next safe Paper startup.</p>')+
@@ -189,11 +203,17 @@
     state.kind=kind;
     state.unmanagedName=null;
     state.detailId=id;state.detailKind=kind;state.detailInfo=null;state.detailError="";
-    state.detailLoading=true;
+    state.detailLoading=true;state.detailsVersionsLoading=true;state.detailVersions=[];
     const epoch=++state.detailEpoch;
     render(state.online);
     try{
-      const info=await invoke("modrinth_project",{projectId:id});
+      const [info,versions]=await Promise.all([
+        invoke("modrinth_project",{projectId:id}),
+        invoke("modrinth_versions",{projectId:id,kind}).catch(()=>[])
+      ]);
+      state.detailVersions=Array.isArray(versions)?versions:[];
+      if(!state.selectedVersions[id]&&state.detailVersions.length)
+        state.selectedVersions[id]=(state.detailVersions.find(v=>v.version_type==="release")||state.detailVersions[0]).id;
       if(epoch!==state.detailEpoch||state.detailId!==id)return;
       state.detailInfo=info&&typeof info==="object"?info:null;
     }catch(error){
@@ -201,14 +221,14 @@
       state.detailError="Full details unavailable: "+String(error).slice(0,140);
     }finally{
       if(epoch===state.detailEpoch&&state.detailId===id){
-        state.detailLoading=false;
+        state.detailLoading=false;state.detailsVersionsLoading=false;
         renderDetail();
       }
     }
   }
   function closeDetail(){
     state.detailId=null;state.unmanagedName=null;state.detailKind=null;state.detailInfo=null;state.detailLoading=false;
-    state.detailEpoch++;
+    state.detailEpoch++;state.detailVersions=[];
     render(state.online);
   }
   function renderResults() {
@@ -701,7 +721,9 @@
       const versionsFound=await invoke("modrinth_versions",{projectId,kind});
       if(!Array.isArray(versionsFound)||!versionsFound.length)
         throw Error("No verified compatible Paper 26.3 release is available.");
-      const version=versionsFound.find(v=>v.version_type==="release")||versionsFound[0];
+      const chosen=state.selectedVersions[projectId];
+      const version=(chosen&&versionsFound.find(v=>v.id===chosen))||
+        versionsFound.find(v=>v.version_type==="release")||versionsFound[0];
       if((version.dependencies||[]).some(d=>d.dependency_type==="required"))
         throw Error("This version has required dependencies. Install them before queuing.");
       if(managed?.versionId===version.id){
@@ -741,6 +763,7 @@
       closeDetail();state.tab="browse";state.query=query.slice(0,100);state.page=0;state.loaded=false;
       render(state.online);search();return;
     }
+    if(action==="dependency"){openDetail(el.dataset.id,"plugin");return;}
     if (action === "details") {openDetail(el.dataset.id,el.dataset.kind||state.kind);return;}
     if (action === "back-details") {closeDetail();return;}
     if (action === "install") install(el.dataset.id);
@@ -784,6 +807,10 @@
   });
   document.addEventListener("change", (event) => {
     if(!active())return;
+    if(event.target.id==="mc-detail-version"){
+      state.selectedVersions[state.detailId]=event.target.value;
+      renderDetail();return;
+    }
     if(event.target.id==="mc-installed-filter"){state.installedFilter=event.target.value;renderInstalledManager();return;}
     if(event.target.id==="mc-installed-sort"){state.installedSort=event.target.value;renderInstalledManager();return;}
     if(event.target.id==="mc-market-sort")setFilter("sort",event.target.value);
