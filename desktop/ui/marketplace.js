@@ -323,6 +323,10 @@
     ensureQueueLoaded();
     ensureContentActionsLoaded();
     ensureInventoryLoaded();
+    // Remote queue is authoritative across app launches and safe restarts.
+    if(Date.now()-state.queueRefreshAt>30000&&!state.queueRefreshBusy){
+      refreshMarketplace(false).catch(error=>status("Queue refresh failed: "+String(error).slice(0,110),true));
+    }
   }
 
   function renderInstalled() {
@@ -422,6 +426,8 @@
         '<button type="button" data-market-action="update-all" class="btn primary small" '+
         (state.updatingAll||state.versionLoading||!updates.length?'disabled':'')+
         '>Queue '+updates.length+' update(s)</button>':'')+
+      (state.tab==="queue"&&(queued.length||actions.length)?
+        '<button type="button" class="btn small danger" data-market-action="cancel-all" '+(state.bulkBusy?'disabled':'')+'>Cancel all</button>':'')+
       '<button type="button" class="btn small" data-market-action="refresh-installed" '+
       (state.inventoryBusy||state.versionLoading?'disabled':'')+'>Refresh versions</button></div></div>'+
       '<div class="mc-managed-notice">Changes are staged for the next safe Paper startup. Queued removals disappear from Installed but remain reversible under Queue.</div>'+
@@ -542,6 +548,46 @@
     }catch(error){status("Could not remove action: "+String(error).slice(0,160),true);}
   }
 
+  async function refreshMarketplace(force=false){
+    if(state.queueRefreshBusy)return;
+    state.queueRefreshBusy=true;
+    try{
+      await Promise.all([ensureQueueLoaded(true),ensureContentActionsLoaded(true),ensureInventoryLoaded(force)]);
+      if(active()){renderInstalled();renderResults();renderInstalledManager();renderDetail();}
+    }finally{state.queueRefreshAt=Date.now();state.queueRefreshBusy=false;}
+  }
+  async function cancelAllPending(){
+    const items=[
+      ...Object.keys(state.queued).map(id=>({id,type:"install"})),
+      ...Object.keys(state.contentActions).map(id=>({id,type:"action"}))
+    ];
+    if(!items.length||state.bulkBusy)return;
+    if(!window.confirm("Cancel all "+items.length+" queued change(s)? No already-applied changes will be reversed."))return;
+    state.bulkBusy=true;
+    const errors=[];
+    try{
+      // Refresh from GitHub first so we don't delete an outdated queue blindly.
+      await Promise.all([ensureQueueLoaded(true),ensureContentActionsLoaded(true)]);
+      for(const item of items){
+        if(item.type==="install"&&!state.queued[item.id])continue;
+        if(item.type==="action"&&!state.contentActions[item.id])continue;
+        try{
+          if(item.type==="install"){
+            await invoke("modrinth_queue_remove",{projectId:item.id});
+            delete state.queued[item.id];
+          }else{
+            await invoke("modrinth_content_action_remove",{projectId:item.id});
+            delete state.contentActions[item.id];
+          }
+        }catch(error){errors.push(item.id+": "+String(error).slice(0,100));}
+      }
+      status(errors.length?"Some changes could not be cancelled: "+errors.slice(0,2).join("; "):
+        "All pending changes cancelled.",Boolean(errors.length));
+    }finally{
+      state.bulkBusy=false;
+      await refreshMarketplace(false);
+    }
+  }
   async function ensureQueueLoaded(force=false){
     if((state.queueLoaded&&!force)||state.queueBusy)return;
     state.queueBusy=true;
@@ -702,6 +748,7 @@
     if (action === "refresh-installed"){state.latestReleases={};refreshMarketplace(true);}
     if (action === "tab"){state.detailId=null;state.unmanagedName=null;state.detailInfo=null;state.detailEpoch++;state.tab=value;render(state.online);if(value!=="browse")loadManagedReleases();return;}
     if (action === "update-installed") queueInstalledUpdate(el.dataset.id).catch(e=>status("Could not queue update: "+String(e).slice(0,160),true));
+    if (action === "cancel-all") cancelAllPending();
     if (action === "update-all") updateAll();
     if (action === "content-action") setContentAction(el.dataset.id,value);
     if (action === "cancel-content") cancelContentAction(el.dataset.id);
