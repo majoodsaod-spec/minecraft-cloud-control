@@ -570,13 +570,15 @@ async fn modrinth_queue_remove(project_id:String)->Result<Value,String>{
     }
     let (mut manifest,sha)=modrinth_queue_manifest().await?;
     let map=manifest.as_object_mut().ok_or("Invalid queue")?;
-    let is_root=map.get(&project_id).and_then(|item|item["bundleRoot"].as_str())==Some(project_id.as_str());
-    map.remove(&project_id);
-    if is_root {
-        let dependent=map.iter().filter_map(|(id,item)|
-            if item["bundleRoot"].as_str()==Some(project_id.as_str()){Some(id.clone())}else{None})
-            .collect::<Vec<_>>();
-        for id in dependent{map.remove(&id);}
+    // Cancelling any newly queued member of a dependency group cancels
+    // the complete group. Never leave a root waiting for a missing required
+    // plugin. Independently queued dependencies have no bundleRoot.
+    let root=map.get(&project_id).and_then(|item|item["bundleRoot"].as_str())
+        .map(str::to_owned);
+    if let Some(root)=root {
+        map.retain(|id,item|id!=&root&&item["bundleRoot"].as_str()!=Some(root.as_str()));
+    }else{
+        map.remove(&project_id);
     }
     let data=serde_json::to_string_pretty(&manifest).map_err(|_|"Could not encode queue")?;
     github(&format!("/contents/{PENDING_MODRINTH}"),reqwest::Method::PUT,Some(json!({
