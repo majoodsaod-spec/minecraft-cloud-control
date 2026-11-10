@@ -165,7 +165,7 @@
     const versions=state.detailVersions;
     const selected=versions.find(v=>v.id===state.selectedVersions[state.detailId])||versions[0];
     const required=(selected?.dependencies||[]).filter(d=>d.dependency_type==="required");
-    const disabled=busy||(!queued&&(installed||removing||!canQueue||Boolean(state.installing)||!selected||required.length>0));
+    const disabled=busy||(!queued&&(installed||removing||!canQueue||Boolean(state.installing)||!selected));
     const gallery=Array.isArray(info.gallery)?info.gallery.filter(g=>trustedIcon(g?.url)).slice(0,4):[];
     area.innerHTML='<button class="mc-detail-back" type="button" data-market-action="back-details">← Back</button>'+
       '<div class="mc-detail-hero"><div class="mc-detail-identity">'+
@@ -192,7 +192,7 @@
       (required.length?'<h3>Required dependencies</h3><div class="mc-required-deps">'+required.map(d=>
         '<p>'+escape(d.project_id||d.version_id||"Unspecified dependency")+
         (d.project_id?'<button type="button" class="btn small flat" data-market-action="dependency" data-id="'+escape(d.project_id)+'">View</button>':'')+'</p>').join("")+'</div>'+ 
-        '<p class="mc-detail-warning">This release cannot be queued until required dependencies are resolved and verified.</p>':"")+
+        '<p class="mc-detail-warning">Required plugins will be checked and offered together before the queue changes.</p>':"")+
       (queued?'<p class="mc-detail-queued">Install queued for next startup. Select Cancel to remove it.</p>':
         installed?'<p class="mc-detail-queued">Installed on this server.</p>':
         removing?'<p>Removal is waiting for the next safe restart.</p>':'<p>Install will be queued for the next safe Paper startup.</p>')+
@@ -702,6 +702,39 @@
     if (active()) render(state.online);
     search();
   }
+  async function resolveDependencyBatch(projectId,rootVersion,kind,title){
+    const picked=new Map(),visiting=new Set();
+    async function visit(id,version,projectKind,projectTitle){
+      if(picked.has(id)){
+        if(picked.get(id).versionId!==version.id)throw Error("Conflicting required versions of "+id);
+        return;
+      }
+      if(visiting.has(id))throw Error("Circular dependencies for "+id);
+      if(picked.size>=20)throw Error("More than 20 required projects. Install dependencies manually.");
+      visiting.add(id);
+      for(const dep of (version.dependencies||[]).filter(d=>d.dependency_type==="required")){
+        const depId=dep.project_id;
+        if(!projectIdOk(depId))throw Error("Modrinth did not provide a verifiable dependency project ID.");
+        const requiredId=dep.version_id;
+        const queued=state.queued[depId],installed=state.inventory.installed?.[depId];
+        if((queued||installed?.enabled!==false&&installed)&&
+           (!requiredId||((queued?.versionId||installed?.versionId)===requiredId))){
+          continue;
+        }
+        const candidates=await invoke("modrinth_versions",{projectId:depId,kind:"plugin"});
+        if(!Array.isArray(candidates)||!candidates.length)
+          throw Error("Required plugin "+depId+" has no compatible Paper 26.3 version.");
+        const match=requiredId?candidates.find(v=>v.id===requiredId):
+          candidates.find(v=>v.version_type==="release")||candidates[0];
+        if(!match)throw Error("Required version of "+depId+" is not compatible with Paper 26.3.");
+        await visit(depId,match,"plugin",depId);
+      }
+      visiting.delete(id);
+      picked.set(id,{projectId:id,versionId:version.id,kind:projectKind,title:projectTitle});
+    }
+    await visit(projectId,rootVersion,kind,title);
+    return [...picked.values()];
+  }
   async function install(projectId) {
     if(state.installing||!projectIdOk(projectId))return;
     if(state.queued[projectId])return unqueue(projectId);
@@ -724,15 +757,25 @@
       const chosen=state.selectedVersions[projectId];
       const version=(chosen&&versionsFound.find(v=>v.id===chosen))||
         versionsFound.find(v=>v.version_type==="release")||versionsFound[0];
-      if((version.dependencies||[]).some(d=>d.dependency_type==="required"))
-        throw Error("This version has required dependencies. Install them before queuing.");
       if(managed?.versionId===version.id){
         status("This release is already installed.",false);
         return;
       }
-      await invoke("modrinth_queue_add",{projectId,versionId:version.id,kind,title});
-      state.queued[projectId]={versionId:version.id,kind,title};
-      status(title+" queued for next safe server startup. Select Cancel to undo.",false);
+      const batch=await resolveDependencyBatch(projectId,version,kind,title);
+      if(batch.length>1){
+        const details=batch.map(item=>item.title+" ("+item.versionId+")").join("\\n");
+        if(!window.confirm("Queue "+batch.length+" verified projects together?\\n\\n"+
+          details+"\\n\\nThey apply on the next safe server startup."))return;
+      }
+      if(batch.length>1){
+        await invoke("modrinth_queue_batch",{items:batch});
+      }else{
+        await invoke("modrinth_queue_add",{projectId,versionId:version.id,kind,title});
+      }
+      for(const item of batch){
+        state.queued[item.projectId]={versionId:item.versionId,kind:item.kind,title:item.title};
+      }
+      status(batch.length+" project(s) queued for next safe startup. Select Cancel to undo.",false);
       renderInstalled();renderInstalledManager();
     }catch(error){
       status("Could not queue install: "+String(error).replace(/^Error:\s*/,"").slice(0,220),true);
