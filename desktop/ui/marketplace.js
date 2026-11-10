@@ -36,6 +36,7 @@
     inventoryLive:null,inventorySession:null,latestReleases:{},tab:"browse",contentActions:{},actionsLoaded:false,
     actionBusy:false,versionLoading:false,updatingAll:false,
     sortTouched: false,
+    detailId:null,detailKind:null,detailInfo:null,detailError:"",detailLoading:false,detailEpoch:0,
     online: false, epoch: 0, searchTimer: null
   };
   const root = () => document.getElementById("mc-marketplace");
@@ -88,14 +89,14 @@
     const current=Boolean(same||unmanaged||record&&!hasKnown);
     const disabled = Boolean(state.installing) || state.version !== "26.3" ||
       Boolean(current&&!queued) || Boolean(checking&&!queued) || Boolean(unavailable&&!queued);
-    const buttonLabel = installing?"Processing…" : queued?"Queued" :
+    const buttonLabel = installing?"Processing…" : queued?"Cancel" :
       current?(record?.enabled===false?"Disabled":"Installed") : checking?"Checking…" : unavailable?"Version unavailable" :
       record && hasKnown ? (state.online?"Update":"Queue update") :
       state.online?"Install":"Queue install";
     return '<article class="mc-discover-card">' +
       '<div class="mc-discover-art">' + icon + '</div>' +
       '<div class="mc-discover-card-main"><div class="mc-discover-title">' +
-      '<strong>' + title + '</strong><span>by ' + escape(item.author || "Unknown") + '</span></div>' +
+      '<button type="button" class="mc-project-open" data-market-action="details" data-id="'+id+'" data-kind="'+escape(state.kind)+'">' + title + '</button><span>by ' + escape(item.author || "Unknown") + '</span></div>' +
       '<p class="mc-discover-description">' + escape(item.description || "No description provided.") + '</p>' +
       '<div class="mc-discover-tags">' +
       '<span class="mc-discover-tag">' + (state.kind === "plugin" ? "Server plugin" : "Data pack") + '</span>' +
@@ -104,9 +105,9 @@
       '<span title="Downloads">↓ ' + compact(item.downloads) + '</span>' +
       '<span title="Followers">♡ ' + compact(item.follows) + '</span>' +
       '<span class="mc-discover-date" title="Last updated">◷ ' + escape(dateAgo(item.date_modified)) + '</span></div>' +
-      '<div class="mc-install-actions"><button type="button" class="mc-discover-install" data-market-action="install" data-id="' +
-      id + '" ' + (disabled||queued ? 'disabled' : '') + '>' + buttonLabel + '</button>' +
-      (queued?'<button type="button" class="mc-queue-remove" data-market-action="unqueue" data-id="'+id+'" aria-label="Remove queued install" title="Remove from queue">×</button>':'') +
+      '<div class="mc-install-actions"><button type="button" class="mc-discover-install" data-market-action="'+(queued?'unqueue':'install')+'" data-id="' +
+      id + '" ' + (disabled&&!queued ? 'disabled' : '') + '>' + buttonLabel + '</button>' +
+      '' +
       '</div></div></article>';
   }
 
@@ -264,7 +265,8 @@
     const area=document.getElementById("mc-installed-manager");
     if(!area)return;
     const {installed={},pluginFiles=[],datapackFiles=[]}=state.inventory;
-    const entries=Object.entries(installed).filter(([,entry])=>entry?.kind===state.kind);
+    const entries=Object.entries(installed).filter(([id,entry])=>
+      entry?.kind===state.kind&&state.contentActions[id]!=="remove");
     const queued=Object.entries(state.queued).filter(([,entry])=>entry?.kind===state.kind);
     const actions=state.kind==="plugin"?Object.entries(state.contentActions):[];
     const updates=entries.filter(([id,entry])=>
@@ -312,7 +314,7 @@
         '>Queue '+updates.length+' update(s)</button>':'')+
       '<button type="button" class="btn small" data-market-action="refresh-installed" '+
       (state.inventoryBusy||state.versionLoading?'disabled':'')+'>Refresh versions</button></div></div>'+
-      '<div class="mc-managed-notice">Updates, disables and removals are staged for the next safe Paper startup. Plugin data and world backups remain intact.</div>'+
+      '<div class="mc-managed-notice">Changes are staged for the next safe Paper startup. Queued removals disappear from Installed but remain reversible under Queue.</div>'+
       content+
       '<p class="mc-managed-footnote">Only verified Modrinth-managed plugins can be disabled or removed here. Other JARs remain visible but cannot be modified by this manager.</p>';
   }
@@ -329,14 +331,14 @@
       latest?.blocked?'Required dependency missing':
       available?'Current version':'Version unavailable';
     const commands=record.kind==="plugin"?
-      action?'<button type="button" class="btn small" data-market-action="cancel-content" data-id="'+escape(id)+'">Undo queued action</button>':
+      action?'<button type="button" class="btn small" data-market-action="cancel-content" data-id="'+escape(id)+'">Cancel '+escape(action)+'</button>':
         '<button type="button" class="btn small" data-market-action="content-action" data-value="'+
           (record.enabled===false?'enable':'disable')+'" data-id="'+escape(id)+'">'+
           (record.enabled===false?'Queue enable':'Queue disable')+'</button>'+
         '<button type="button" class="btn small danger" data-market-action="content-action" data-value="remove" data-id="'+escape(id)+'">Queue removal</button>'
       :'';
-    return '<div class="mc-managed-row"><div class="mc-managed-meta"><strong>'+
-      escape(record.title||id)+'</strong><span>Installed: '+escape(record.version||"Unknown")+
+    return '<div class="mc-managed-row"><div class="mc-managed-meta"><button type="button" class="mc-project-open" data-market-action="details" data-id="'+escape(id)+'" data-kind="'+escape(record.kind)+'">'+
+      escape(record.title||id)+'</button><span>Installed: '+escape(record.version||"Unknown")+
       ' · '+escape(stateLabel)+
       (update?' · Available: '+escape(update.version_number||update.name||"Compatible release"):'')+
       '</span></div><div class="mc-managed-actions">'+
@@ -410,7 +412,7 @@
       await invoke("modrinth_content_action_set",{projectId,action});
       state.contentActions[projectId]=action;state.actionsLoaded=true;
       status("Plugin "+action+" queued for next server startup.",false);
-      renderInstalledManager();
+      renderInstalledManager();renderResults();renderDetail();
     }catch(error){status("Could not queue plugin action: "+String(error).slice(0,160),true);}
   }
   async function cancelContentAction(projectId){
@@ -418,7 +420,7 @@
     try{
       await invoke("modrinth_content_action_remove",{projectId});
       delete state.contentActions[projectId];
-      renderInstalledManager();
+      renderInstalledManager();renderResults();renderDetail();
       status("Queued plugin action removed. Already applied changes are not reversed.",false);
     }catch(error){status("Could not remove action: "+String(error).slice(0,160),true);}
   }
