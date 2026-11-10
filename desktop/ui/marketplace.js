@@ -73,15 +73,9 @@
     const installing = state.installing === item.project_id;
     const record = state.inventory.installed?.[item.project_id] ||
       state.installed.find(x=>x.projectId===item.project_id);
-    const files=state.kind==="plugin"?state.inventory.pluginFiles:state.inventory.datapackFiles;
-    const normalized=value=>String(value||"").toLowerCase().replace(/[^a-z0-9]/g,"");
-    const titleStem=normalized(item.slug||item.title);
-    const suffix=state.kind==="plugin"?".jar":".zip";
-    const unmanaged=!record && Array.isArray(files) && files.some(file=>{
-      if(!String(file).endsWith(suffix))return false;
-      const stem=normalized(String(file).slice(0,-suffix.length));
-      return stem===titleStem || stem===normalized(item.title);
-    });
+    // Never infer a verified installed project from a similar-looking JAR name.
+    // Only the authenticated Modrinth inventory identifies managed content.
+    const unmanaged=false;
     const latest=state.latestReleases[item.project_id];
     const queued=state.queued[item.project_id];
     const same=record&&latest&&record.versionId===latest.id;
@@ -428,7 +422,11 @@
             'Checking installed projects for compatible releases…':
             'No confirmed compatible updates found.')+'</div>'):
       '<div class="mc-managed-list">'+
-        displayed.map(([id,entry])=>managedRow(id,entry,false)).join("")+
+        displayed.map(([id,entry])=>
+          '<div class="mc-bulk-row">'+
+          (entry.kind==="plugin"&&!state.queued[id]&&!state.contentActions[id]?
+            '<input type="checkbox" class="mc-bulk-select" data-bulk-id="'+escape(id)+'" aria-label="Select '+escape(entry.title||id)+' for bulk action">':'')+
+          managedRow(id,entry,false)+'</div>').join("")+
         unmanaged.map(name=>'<div class="mc-managed-row"><div><button type="button" class="mc-project-open" data-market-action="unmanaged-details" data-name="'+escape(name)+'">'+
           escape(name)+'</button><span>Unmanaged file · Version unknown · Read-only</span></div>'+
           '<span class="mc-managed-neutral">Unmanaged</span></div>').join("")+
@@ -446,6 +444,7 @@
         '<button type="button" data-market-action="update-all" class="btn primary small" '+
         (state.updatingAll||state.versionLoading||!updates.length?'disabled':'')+
         '>Queue '+updates.length+' update(s)</button>':'')+
+      (state.tab==="installed"?'<button type="button" class="btn small danger" data-market-action="bulk-remove" '+(state.bulkBusy?'disabled':'')+'>Remove selected</button>':'')+
       (state.tab==="queue"&&(queued.length||actions.length)?
         '<button type="button" class="btn small danger" data-market-action="cancel-all" '+(state.bulkBusy?'disabled':'')+'>Cancel all</button>':'')+
       '<button type="button" class="btn small" data-market-action="refresh-installed" '+
@@ -474,6 +473,7 @@
       latest?.blocked?'Required dependency missing':
       available?'Current version':'Version unavailable';
     const commands=record.kind==="plugin"?
+      pending?'<button type="button" class="btn small" data-market-action="unqueue" data-id="'+escape(id)+'">Cancel update</button>':
       action?'<button type="button" class="btn small" data-market-action="cancel-content" data-id="'+escape(id)+'">Cancel '+escape(action)+'</button>':
         '<button type="button" class="btn small" data-market-action="content-action" data-value="'+
           (record.enabled===false?'enable':'disable')+'" data-id="'+escape(id)+'">'+
@@ -575,6 +575,29 @@
       await Promise.all([ensureQueueLoaded(true),ensureContentActionsLoaded(true),ensureInventoryLoaded(force)]);
       if(active()){renderInstalled();renderResults();renderInstalledManager();renderDetail();}
     }finally{state.queueRefreshAt=Date.now();state.queueRefreshBusy=false;}
+  }
+  async function removeSelected(){
+    if(state.bulkBusy)return;
+    const selected=[...document.querySelectorAll(".mc-bulk-select:checked")]
+      .map(node=>node.dataset.bulkId).filter(projectIdOk);
+    if(!selected.length)return status("Select one or more managed plugins first.",false);
+    if(!window.confirm("Queue removal of "+selected.length+" plugin(s)? They disappear from Installed, but the queue can be cancelled before Paper restarts."))return;
+    state.bulkBusy=true;
+    const errors=[];
+    try{
+      for(const id of selected){
+        try{
+          await invoke("modrinth_content_action_set",{projectId:id,action:"remove"});
+          state.contentActions[id]="remove";
+        }catch(error){errors.push(id+": "+String(error).slice(0,90));}
+      }
+      status(errors.length?"Some plugins could not be queued: "+errors.slice(0,2).join("; "):
+        selected.length+" removal(s) staged. Restore them from Queue if needed.",Boolean(errors.length));
+    }finally{
+      state.bulkBusy=false;
+      renderInstalledManager();renderDetail();
+      await refreshMarketplace(false);
+    }
   }
   async function cancelAllPending(){
     const items=[
@@ -814,6 +837,7 @@
     if (action === "refresh-installed"){state.latestReleases={};refreshMarketplace(true);}
     if (action === "tab"){state.detailId=null;state.unmanagedName=null;state.detailInfo=null;state.detailEpoch++;state.tab=value;render(state.online);if(value!=="browse")loadManagedReleases();return;}
     if (action === "update-installed") queueInstalledUpdate(el.dataset.id).catch(e=>status("Could not queue update: "+String(e).slice(0,160),true));
+    if (action === "bulk-remove") removeSelected();
     if (action === "cancel-all") cancelAllPending();
     if (action === "update-all") updateAll();
     if (action === "content-action") setContentAction(el.dataset.id,value);
