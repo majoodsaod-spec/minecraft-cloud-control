@@ -265,7 +265,9 @@ test("Modrinth content queues offline and downloads only on the server",()=>{
   assert.match(serverRust,/async fn modrinth_queue_add\(/);
   assert.match(serverRust,/async fn modrinth_queue_remove\(/);
   assert.match(serverRust,/async fn modrinth_queue_list\(/);
-  assert.match(rust,/modrinth_queue_list,modrinth_queue_add,modrinth_queue_remove/);
+  assert.match(rust,/modrinth_queue_list,modrinth_queue_add,modrinth_queue_batch,modrinth_queue_remove/);
+  assert.match(serverRust,/async fn modrinth_queue_batch\(/);
+  assert.match(market,/resolveDependencyBatch\(/);
 });
 
 test("World inventory is private, bounded and does not retry endlessly after errors",()=>{
@@ -314,6 +316,22 @@ test("Queued removals are hidden from Installed but remain cancellable in Queue"
   assert.match(market,/state\.tab==="queue"/);
   assert.match(market,/modrinth_content_action_remove/);
   assert.match(market,/Cancel.*remove|Cancel removal/s);
+});
+test("Plugin manager supports filter, bulk actions, and atomic dependency installs",()=>{
+  assert.match(market,/mc-installed-search/);
+  assert.match(market,/mc-installed-filter/);
+  assert.match(market,/mc-installed-sort/);
+  assert.match(market,/data-market-action="bulk-remove"/);
+  assert.match(market,/data-market-action="cancel-all"/);
+  assert.match(market,/async function refreshMarketplace\(/);
+  assert.match(market,/async function resolveDependencyBatch\(/);
+  assert.match(market,/modrinth_queue_batch/);
+  assert.match(market,/mc-detail-version/);
+  assert.match(market,/Required dependencies/);
+  assert.match(serverRust,/Duplicate project in installation batch/);
+  assert.match(serverRust,/Dependency has no resolvable project ID/);
+  assert.match(serverRust,/Release belongs to another project/);
+  assert.doesNotMatch(market,/stem===titleStem/);
 });
 test("Marketplace supports removing queued cards and installed version comparison",()=>{
   assert.match(market,/data-market-action="unqueue"/);
