@@ -160,12 +160,12 @@
     const canQueue=state.detailKind===state.kind&&state.version==="26.3";
     const label=busy?"Processing…":queued?"Cancel":installed?"Installed":removing?"Removal queued":"Install";
     const action=queued?"unqueue":"install";
-    const disabled=busy||(!queued&&(installed||removing||!canQueue||Boolean(state.installing)||!selected||required.length>0));
     const icon=trustedIcon(info.icon_url||summary.icon_url);
     const description=info.body||info.description||summary.description||"No project description available.";
     const versions=state.detailVersions;
     const selected=versions.find(v=>v.id===state.selectedVersions[state.detailId])||versions[0];
     const required=(selected?.dependencies||[]).filter(d=>d.dependency_type==="required");
+    const disabled=busy||(!queued&&(installed||removing||!canQueue||Boolean(state.installing)||!selected||required.length>0));
     const gallery=Array.isArray(info.gallery)?info.gallery.filter(g=>trustedIcon(g?.url)).slice(0,4):[];
     area.innerHTML='<button class="mc-detail-back" type="button" data-market-action="back-details">← Back</button>'+
       '<div class="mc-detail-hero"><div class="mc-detail-identity">'+
