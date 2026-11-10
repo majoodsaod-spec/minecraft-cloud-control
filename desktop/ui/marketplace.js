@@ -370,7 +370,8 @@
     const actions=state.kind==="plugin"?Object.entries(state.contentActions):[];
     const updates=entries.filter(([id,entry])=>
       entry.enabled!==false&&!state.contentActions[id]&&compatibleUpdate(id,entry));
-    const knownNames=new Set(entries.map(([id,entry])=>"modrinth-"+id+(entry.kind==="plugin"?".jar":".zip")));
+    const knownNames=new Set(Object.entries(installed).map(([id,entry])=>
+      "modrinth-"+id+(entry.kind==="plugin"?".jar":".zip")));
     const unmanaged=(state.kind==="plugin"?pluginFiles:datapackFiles)
       .filter(name=>!knownNames.has(name)).sort((a,b)=>a.localeCompare(b));
     const title=state.tab==="installed"?"Installed content":
