@@ -34,7 +34,8 @@
     queued: {}, queueLoaded: false, queueBusy: false,
     inventory: {installed:{},pluginFiles:[],datapackFiles:[]}, inventoryLoaded:false,inventoryBusy:false,
     inventoryLive:null,inventorySession:null,latestReleases:{},tab:"browse",contentActions:{},actionsLoaded:false,
-    actionBusy:false,versionLoading:false,updatingAll:false,
+    actionBusy:false,versionLoading:false,updatingAll:false,bulkBusy:false,queueRefreshAt:0,queueRefreshBusy:false,
+    installedSearch:"",installedFilter:"all",installedSort:"name",
     sortTouched: false,
     detailId:null,detailKind:null,detailInfo:null,detailError:"",detailLoading:false,detailEpoch:0,unmanagedName:null,
     online: false, epoch: 0, searchTimer: null
@@ -87,10 +88,11 @@
     const checking=Boolean(record?.versionId)&&(!latest||latest.pending);
     const unavailable=Boolean(record?.versionId&&latest?.unavailable);
     const current=Boolean(same||unmanaged||record&&!hasKnown);
-    const disabled = Boolean(state.installing) || state.version !== "26.3" ||
+    const removing=state.contentActions[item.project_id]==="remove";
+    const disabled = Boolean(state.installing)||removing || state.version !== "26.3" ||
       Boolean(current&&!queued) || Boolean(checking&&!queued) || Boolean(unavailable&&!queued);
     const buttonLabel = installing?"Processing…" : queued?"Cancel" :
-      current?(record?.enabled===false?"Disabled":"Installed") : checking?"Checking…" : unavailable?"Version unavailable" :
+      removing?"Removal queued":current?(record?.enabled===false?"Disabled":"Installed") : checking?"Checking…" : unavailable?"Version unavailable" :
       record && hasKnown ? (state.online?"Update":"Queue update") :
       state.online?"Install":"Queue install";
     return '<article class="mc-discover-card">' +
@@ -366,6 +368,14 @@
     const {installed={},pluginFiles=[],datapackFiles=[]}=state.inventory;
     const entries=Object.entries(installed).filter(([id,entry])=>
       entry?.kind===state.kind&&state.contentActions[id]!=="remove");
+    const matches=([id,entry])=>(entry.title||id).toLowerCase().includes(state.installedSearch.toLowerCase())&&
+      (state.installedFilter==="all"||
+       state.installedFilter==="disabled"&&entry.enabled===false||
+       state.installedFilter==="enabled"&&entry.enabled!==false||
+       state.installedFilter==="updates"&&Boolean(compatibleUpdate(id,entry)));
+    const displayed=entries.filter(matches).sort((a,b)=>state.installedSort==="version"?
+      String(a[1].version||"").localeCompare(String(b[1].version||"")):
+      String(a[1].title||a[0]).localeCompare(String(b[1].title||b[0])));
     const queued=Object.entries(state.queued).filter(([,entry])=>entry?.kind===state.kind);
     const actions=state.kind==="plugin"?Object.entries(state.contentActions):[];
     const updates=entries.filter(([id,entry])=>
@@ -382,10 +392,10 @@
           '<div class="mc-managed-list">'+
           queued.map(([id,item])=>'<div class="mc-managed-row"><div><button type="button" class="mc-project-open" data-market-action="details" data-id="'+escape(id)+'" data-kind="'+escape(item.kind)+'">'+
             escape(item.title||id)+'</button><span>Version '+escape(item.versionId)+
-            ' · Pending install/update</span></div><button class="btn small" data-market-action="unqueue" data-id="'+escape(id)+'">× Remove</button></div>').join("")+
+            ' · Pending install/update</span></div><button class="btn small" data-market-action="unqueue" data-id="'+escape(id)+'">Cancel</button></div>').join("")+
           actions.map(([id,action])=>'<div class="mc-managed-row"><div><button type="button" class="mc-project-open" data-market-action="details" data-id="'+escape(id)+'" data-kind="plugin">'+
             escape(installed[id]?.title||id)+'</button><span>Pending: '+escape(action)+
-            '</span></div><button class="btn small" data-market-action="cancel-content" data-id="'+escape(id)+'">× Remove</button></div>').join("")+'</div>':
+            '</span></div><button class="btn small" data-market-action="cancel-content" data-id="'+escape(id)+'">Cancel</button></div>').join("")+'</div>':
           '<div class="mc-managed-empty">No pending plugin or datapack changes.</div>'):
       state.tab==="updates"?
         (updates.length?'<div class="mc-managed-list">'+updates.map(([id,entry])=>
@@ -394,7 +404,7 @@
             'Checking installed projects for compatible releases…':
             'No confirmed compatible updates found.')+'</div>'):
       '<div class="mc-managed-list">'+
-        entries.map(([id,entry])=>managedRow(id,entry,false)).join("")+
+        displayed.map(([id,entry])=>managedRow(id,entry,false)).join("")+
         unmanaged.map(name=>'<div class="mc-managed-row"><div><button type="button" class="mc-project-open" data-market-action="unmanaged-details" data-name="'+escape(name)+'">'+
           escape(name)+'</button><span>Unmanaged file · Version unknown · Read-only</span></div>'+
           '<span class="mc-managed-neutral">Unmanaged</span></div>').join("")+
@@ -415,6 +425,13 @@
       '<button type="button" class="btn small" data-market-action="refresh-installed" '+
       (state.inventoryBusy||state.versionLoading?'disabled':'')+'>Refresh versions</button></div></div>'+
       '<div class="mc-managed-notice">Changes are staged for the next safe Paper startup. Queued removals disappear from Installed but remain reversible under Queue.</div>'+
+      (state.tab==="installed"?'<div class="mc-installed-filters"><input id="mc-installed-search" type="search" placeholder="Search installed content…" value="'+escape(state.installedSearch)+'" aria-label="Search installed plugins">'+
+        '<select id="mc-installed-filter" aria-label="Installed plugin status">'+
+        [["all","All"],["enabled","Enabled"],["disabled","Disabled"],["updates","Updates available"]].map(([v,label])=>
+          '<option value="'+v+'" '+(state.installedFilter===v?"selected":"")+'>'+label+'</option>').join("")+'</select>'+
+        '<select id="mc-installed-sort" aria-label="Sort installed plugins">'+
+        [["name","Name"],["version","Version"]].map(([v,label])=>
+          '<option value="'+v+'" '+(state.installedSort===v?"selected":"")+'>'+label+'</option>').join("")+'</select></div>':'')+
       content+
       '<p class="mc-managed-footnote">Only verified Modrinth-managed plugins can be disabled or removed here. Other JARs remain visible but cannot be modified by this manager.</p>';
   }
@@ -682,7 +699,7 @@
     if (action === "back-details") {closeDetail();return;}
     if (action === "install") install(el.dataset.id);
     if (action === "unqueue") unqueue(el.dataset.id);
-    if (action === "refresh-installed"){state.latestReleases={};ensureInventoryLoaded(true);}
+    if (action === "refresh-installed"){state.latestReleases={};refreshMarketplace(true);}
     if (action === "tab"){state.detailId=null;state.unmanagedName=null;state.detailInfo=null;state.detailEpoch++;state.tab=value;render(state.online);if(value!=="browse")loadManagedReleases();return;}
     if (action === "update-installed") queueInstalledUpdate(el.dataset.id).catch(e=>status("Could not queue update: "+String(e).slice(0,160),true));
     if (action === "update-all") updateAll();
@@ -698,7 +715,16 @@
     }
   });
   document.addEventListener("input", (event) => {
-    if (event.target.id !== "mc-market-query" || !active()) return;
+    if(!active())return;
+    if(event.target.id==="mc-installed-search"){
+      state.installedSearch=event.target.value.slice(0,100);
+      const selection=event.target.selectionStart;
+      renderInstalledManager();
+      const next=document.getElementById("mc-installed-search");
+      next?.focus();try{next?.setSelectionRange(selection,selection);}catch{}
+      return;
+    }
+    if (event.target.id !== "mc-market-query") return;
     state.query = event.target.value.slice(0, 100);
     state.page = 0;
     if (!state.sortTouched) {
@@ -710,8 +736,10 @@
     state.searchTimer = setTimeout(search, 400);
   });
   document.addEventListener("change", (event) => {
-    if (event.target.id !== "mc-market-sort" || !active()) return;
-    setFilter("sort", event.target.value);
+    if(!active())return;
+    if(event.target.id==="mc-installed-filter"){state.installedFilter=event.target.value;renderInstalledManager();return;}
+    if(event.target.id==="mc-installed-sort"){state.installedSort=event.target.value;renderInstalledManager();return;}
+    if(event.target.id==="mc-market-sort")setFilter("sort",event.target.value);
   });
   document.addEventListener("submit", (event) => {
     if (event.target.id !== "mc-market-search-form" || !active()) return;
