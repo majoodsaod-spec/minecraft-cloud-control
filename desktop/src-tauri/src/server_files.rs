@@ -479,9 +479,12 @@ async fn modrinth_queue_add(project_id:String,version_id:String,kind:String,titl
 // Atomically stage a dependency-closed set. No partial queues are committed
 // if a project, release, compatibility constraint, or dependency fails.
 #[tauri::command]
-async fn modrinth_queue_batch(items:Vec<Value>)->Result<Value,String>{
+async fn modrinth_queue_batch(items:Vec<Value>,root_id:String)->Result<Value,String>{
     if items.is_empty()||items.len()>20 {
         return Err("Select between one and twenty projects".into());
+    }
+    if root_id.len()<3||root_id.len()>32||!root_id.chars().all(|c|c.is_ascii_alphanumeric()){
+        return Err("Invalid installation group root".into());
     }
     let valid=|id:&str|id.len()>=3&&id.len()<=32&&id.chars().all(|c|c.is_ascii_alphanumeric());
     let (mut manifest,sha)=modrinth_queue_manifest().await?;
@@ -520,6 +523,7 @@ async fn modrinth_queue_batch(items:Vec<Value>)->Result<Value,String>{
         selected.insert(id.to_owned(),json!({"versionId":version,"kind":kind,"title":title}));
         versions.push((id.to_owned(),release));
     }
+    if !selected.contains_key(&root_id){return Err("Installation batch must include its main project".into());}
     // Verify the entire dependency graph against exact versions queued here,
     // previously staged versions, or verified enabled installed plugins.
     for (id,release) in versions.iter(){
@@ -544,7 +548,12 @@ async fn modrinth_queue_batch(items:Vec<Value>)->Result<Value,String>{
     if map.len()+selected.keys().filter(|id|!map.contains_key(*id)).count()>100{
         return Err("Install queue would exceed 100 projects".into());
     }
-    for (id,entry) in selected{map.insert(id,entry);}
+    for (id,mut entry) in selected{
+        // Already-queued independent dependencies are not reassigned to the
+        // current group; only newly staged items are removed with its root.
+        if !map.contains_key(&id){entry["bundleRoot"]=json!(root_id);}
+        map.insert(id,entry);
+    }
     let content=serde_json::to_string_pretty(&manifest).map_err(|_|"Could not encode queue")?;
     github(&format!("/contents/{PENDING_MODRINTH}"),reqwest::Method::PUT,
        Some(json!({"branch":"main","sha":sha,
@@ -558,7 +567,15 @@ async fn modrinth_queue_remove(project_id:String)->Result<Value,String>{
         return Err("Invalid Modrinth project".into())
     }
     let (mut manifest,sha)=modrinth_queue_manifest().await?;
-    manifest.as_object_mut().ok_or("Invalid queue")?.remove(&project_id);
+    let map=manifest.as_object_mut().ok_or("Invalid queue")?;
+    let is_root=map.get(&project_id).and_then(|item|item["bundleRoot"].as_str())==Some(project_id.as_str());
+    map.remove(&project_id);
+    if is_root {
+        let dependent=map.iter().filter_map(|(id,item)|
+            if item["bundleRoot"].as_str()==Some(project_id.as_str()){Some(id.clone())}else{None})
+            .collect::<Vec<_>>();
+        for id in dependent{map.remove(&id);}
+    }
     let data=serde_json::to_string_pretty(&manifest).map_err(|_|"Could not encode queue")?;
     github(&format!("/contents/{PENDING_MODRINTH}"),reqwest::Method::PUT,Some(json!({
         "branch":"main","sha":sha,
