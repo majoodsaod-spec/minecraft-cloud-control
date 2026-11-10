@@ -476,6 +476,82 @@ async fn modrinth_queue_add(project_id:String,version_id:String,kind:String,titl
     }))).await?;
     Ok(json!({"queued":true,"projectId":project_id,"kind":kind}))
 }
+// Atomically stage a dependency-closed set. No partial queues are committed
+// if a project, release, compatibility constraint, or dependency fails.
+#[tauri::command]
+async fn modrinth_queue_batch(items:Vec<Value>)->Result<Value,String>{
+    if items.is_empty()||items.len()>20 {
+        return Err("Select between one and twenty projects".into());
+    }
+    let valid=|id:&str|id.len()>=3&&id.len()<=32&&id.chars().all(|c|c.is_ascii_alphanumeric());
+    let (mut manifest,sha)=modrinth_queue_manifest().await?;
+    let existing=manifest.as_object().ok_or("Invalid queue")?;
+    let (actions,_)=pending_content_actions().await?;
+    let installed=modrinth_installed_inventory(false).await
+        .ok().and_then(|value|value.get("installed").cloned())
+        .unwrap_or(json!({}));
+    let mut selected=serde_json::Map::new();
+    let mut versions=Vec::new();
+    for item in items.iter(){
+        let id=item["projectId"].as_str().ok_or("Missing project ID")?;
+        let version=item["versionId"].as_str().ok_or("Missing version ID")?;
+        let kind=item["kind"].as_str().ok_or("Missing project kind")?;
+        let title=item["title"].as_str().ok_or("Missing project title")?;
+        if !valid(id)||!valid(version)||!["plugin","datapack"].contains(&kind)||
+           title.len()>160||title.chars().any(char::is_control) {
+            return Err("Invalid queued content".into());
+        }
+        if selected.contains_key(id){return Err("Duplicate project in installation batch".into());}
+        if ["disable","remove"].contains(&actions[id].as_str().unwrap_or("")){
+            return Err(format!("Cancel the queued disable/removal of {id} first"));
+        }
+        let response=http().get(format!("https://api.modrinth.com/v2/version/{version}"))
+          .send().await.map_err(|_|"Could not verify all Modrinth releases")?;
+        if !response.status().is_success(){return Err("Modrinth release unavailable".into());}
+        let release=response.json::<Value>().await.map_err(|_|"Invalid release response")?;
+        if release["project_id"].as_str()!=Some(id){return Err("Release belongs to another project".into());}
+        let compatible=release["game_versions"].as_array().map(|a|
+            a.iter().any(|v|v.as_str()==Some("26.3"))).unwrap_or(false);
+        let compatible_loader=release["loaders"].as_array().map(|a|
+            a.iter().any(|v|v.as_str().map(|l|
+                if kind=="plugin"{["paper","spigot","bukkit","purpur"].contains(&l)}
+                else{l=="datapack"}).unwrap_or(false))).unwrap_or(false);
+        if !compatible||!compatible_loader {return Err(format!("{id} is not compatible with Paper 26.3"));}
+        selected.insert(id.to_owned(),json!({"versionId":version,"kind":kind,"title":title}));
+        versions.push((id.to_owned(),release));
+    }
+    // Verify the entire dependency graph against exact versions queued here,
+    // previously staged versions, or verified enabled installed plugins.
+    for (id,release) in versions.iter(){
+        if let Some(deps)=release["dependencies"].as_array(){
+            for dep in deps.iter().filter(|d|d["dependency_type"]=="required"){
+                let project=dep["project_id"].as_str().ok_or("Dependency has no resolvable project ID")?;
+                let requested=dep["version_id"].as_str();
+                let staged=selected.get(project).or_else(||existing.get(project));
+                let saved=installed.get(project).filter(|v|v["enabled"]!=false);
+                let resolved=staged.or(saved).ok_or_else(||
+                    format!("{id} requires {project}. Add its compatible release first."))?;
+                let actual=resolved["versionId"].as_str();
+                if let Some(exact)=requested {
+                    if actual!=Some(exact){
+                        return Err(format!("{id} requires a specific version of {project}."));
+                    }
+                }
+            }
+        }
+    }
+    let map=manifest.as_object_mut().ok_or("Invalid install queue")?;
+    if map.len()+selected.keys().filter(|id|!map.contains_key(*id)).count()>100{
+        return Err("Install queue would exceed 100 projects".into());
+    }
+    for (id,entry) in selected{map.insert(id,entry);}
+    let content=serde_json::to_string_pretty(&manifest).map_err(|_|"Could not encode queue")?;
+    github(&format!("/contents/{PENDING_MODRINTH}"),reqwest::Method::PUT,
+       Some(json!({"branch":"main","sha":sha,
+        "message":"Queue verified Modrinth content with required dependencies",
+        "content":encode_content(&(content+"\\n"))}))).await?;
+    Ok(json!({"queued":true,"count":items.len()}))
+}
 #[tauri::command]
 async fn modrinth_queue_remove(project_id:String)->Result<Value,String>{
     if project_id.len()<3||project_id.len()>32||!project_id.chars().all(|c|c.is_ascii_alphanumeric()){
