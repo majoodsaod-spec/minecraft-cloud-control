@@ -549,7 +549,7 @@ async fn modrinth_queue_batch(items:Vec<Value>)->Result<Value,String>{
     github(&format!("/contents/{PENDING_MODRINTH}"),reqwest::Method::PUT,
        Some(json!({"branch":"main","sha":sha,
         "message":"Queue verified Modrinth content with required dependencies",
-        "content":encode_content(&(content+"\\n"))}))).await?;
+        "content":encode_content(&(content+"\n"))}))).await?;
     Ok(json!({"queued":true,"count":items.len()}))
 }
 #[tauri::command]
