@@ -36,7 +36,7 @@
     inventoryLive:null,inventorySession:null,latestReleases:{},tab:"browse",contentActions:{},actionsLoaded:false,
     actionBusy:false,versionLoading:false,updatingAll:false,
     sortTouched: false,
-    detailId:null,detailKind:null,detailInfo:null,detailError:"",detailLoading:false,detailEpoch:0,
+    detailId:null,detailKind:null,detailInfo:null,detailError:"",detailLoading:false,detailEpoch:0,unmanagedName:null,
     online: false, epoch: 0, searchTimer: null
   };
   const root = () => document.getElementById("mc-marketplace");
@@ -135,6 +135,15 @@
   function renderDetail(){
     const area=document.getElementById("mc-project-detail");
     if(!area)return;
+    if(state.unmanagedName){
+      area.hidden=false;
+      area.innerHTML='<button class="mc-detail-back" data-market-action="back-details" type="button">← Back</button>'+
+        '<section class="mc-detail-hero"><div class="mc-detail-identity"><span class="mc-detail-icon mc-detail-fallback">⬡</span>'+
+        '<div><div class="mc-detail-eyebrow">Local server content</div><h2>'+escape(state.unmanagedName)+'</h2>'+
+        '<p>This file was not installed using the verified Modrinth manager. Its project description, author, and version cannot be verified from the JAR name alone.</p></div></div>'+
+        '<button type="button" class="btn primary" data-market-action="search-unmanaged">Find on Modrinth</button></section>';
+      return;
+    }
     if(!state.detailId){area.innerHTML="";area.hidden=true;return;}
     area.hidden=false;
     const info=state.detailInfo||{},summary=projectSummary();
@@ -176,6 +185,7 @@
   async function openDetail(id,kind){
     if(!projectIdOk(id)||!["plugin","datapack"].includes(kind))return;
     state.kind=kind;
+    state.unmanagedName=null;
     state.detailId=id;state.detailKind=kind;state.detailInfo=null;state.detailError="";
     state.detailLoading=true;
     const epoch=++state.detailEpoch;
@@ -195,7 +205,7 @@
     }
   }
   function closeDetail(){
-    state.detailId=null;state.detailKind=null;state.detailInfo=null;state.detailLoading=false;
+    state.detailId=null;state.unmanagedName=null;state.detailKind=null;state.detailInfo=null;state.detailLoading=false;
     state.detailEpoch++;
     render(state.online);
   }
@@ -282,8 +292,8 @@
           '" role="tab" aria-selected="'+(state.tab===key)+'" class="'+(state.tab===key?"active":"")+'">'+label+'</button>').join("")+
       '</div>'+
       '<section id="mc-installed-manager" class="mc-installed-manager" '+
-        (state.tab==="browse"||state.detailId?'hidden':'')+'></section>'+
-      '<div class="mc-discover-layout" '+(state.tab==="browse"&&!state.detailId?'':'style="display:none"')+'>' + filters() + '<div class="mc-discover-primary">' +
+        (state.tab==="browse"||state.detailId||state.unmanagedName?'hidden':'')+'></section>'+
+      '<div class="mc-discover-layout" '+(state.tab==="browse"&&!state.detailId&&!state.unmanagedName?'':'style="display:none"')+'>' + filters() + '<div class="mc-discover-primary">' +
       '<form id="mc-market-search-form" class="mc-discover-search"><span>⌕</span>' +
       '<input id="mc-market-query" type="search" autocomplete="off" placeholder="Search ' +
       (state.kind === "plugin" ? "plugins" : "datapacks") + '…" value="' + escape(state.query) +
@@ -369,11 +379,11 @@
       state.tab==="queue"?
         (queued.length||actions.length?
           '<div class="mc-managed-list">'+
-          queued.map(([id,item])=>'<div class="mc-managed-row"><div><strong>'+
-            escape(item.title||id)+'</strong><span>Version '+escape(item.versionId)+
+          queued.map(([id,item])=>'<div class="mc-managed-row"><div><button type="button" class="mc-project-open" data-market-action="details" data-id="'+escape(id)+'" data-kind="'+escape(item.kind)+'">'+
+            escape(item.title||id)+'</button><span>Version '+escape(item.versionId)+
             ' · Pending install/update</span></div><button class="btn small" data-market-action="unqueue" data-id="'+escape(id)+'">× Remove</button></div>').join("")+
-          actions.map(([id,action])=>'<div class="mc-managed-row"><div><strong>'+
-            escape(installed[id]?.title||id)+'</strong><span>Pending: '+escape(action)+
+          actions.map(([id,action])=>'<div class="mc-managed-row"><div><button type="button" class="mc-project-open" data-market-action="details" data-id="'+escape(id)+'" data-kind="plugin">'+
+            escape(installed[id]?.title||id)+'</button><span>Pending: '+escape(action)+
             '</span></div><button class="btn small" data-market-action="cancel-content" data-id="'+escape(id)+'">× Remove</button></div>').join("")+'</div>':
           '<div class="mc-managed-empty">No pending plugin or datapack changes.</div>'):
       state.tab==="updates"?
@@ -384,8 +394,8 @@
             'No confirmed compatible updates found.')+'</div>'):
       '<div class="mc-managed-list">'+
         entries.map(([id,entry])=>managedRow(id,entry,false)).join("")+
-        unmanaged.map(name=>'<div class="mc-managed-row"><div><strong>'+
-          escape(name)+'</strong><span>Unmanaged file · Version unknown · Read-only</span></div>'+
+        unmanaged.map(name=>'<div class="mc-managed-row"><div><button type="button" class="mc-project-open" data-market-action="unmanaged-details" data-name="'+escape(name)+'">'+
+          escape(name)+'</button><span>Unmanaged file · Version unknown · Read-only</span></div>'+
           '<span class="mc-managed-neutral">Unmanaged</span></div>').join("")+
         (!entries.length&&!unmanaged.length?
           '<div class="mc-managed-empty">No installed content detected.</div>':'')+
@@ -659,12 +669,20 @@
       state.epoch++; state.loaded = false;
       render(state.online); search();
     }
+    if (action === "unmanaged-details") {
+      state.unmanagedName=el.dataset.name||null;state.detailId=null;state.detailEpoch++;render(state.online);return;
+    }
+    if (action === "search-unmanaged") {
+      const query=state.unmanagedName?.replace(/\\.(jar|zip)$/i,"").replace(/[-_]/g," ")||"";
+      closeDetail();state.tab="browse";state.query=query.slice(0,100);state.page=0;state.loaded=false;
+      render(state.online);search();return;
+    }
     if (action === "details") {openDetail(el.dataset.id,el.dataset.kind||state.kind);return;}
     if (action === "back-details") {closeDetail();return;}
     if (action === "install") install(el.dataset.id);
     if (action === "unqueue") unqueue(el.dataset.id);
     if (action === "refresh-installed"){state.latestReleases={};ensureInventoryLoaded(true);}
-    if (action === "tab"){state.detailId=null;state.detailInfo=null;state.detailEpoch++;state.tab=value;render(state.online);if(value!=="browse")loadManagedReleases();return;}
+    if (action === "tab"){state.detailId=null;state.unmanagedName=null;state.detailInfo=null;state.detailEpoch++;state.tab=value;render(state.online);if(value!=="browse")loadManagedReleases();return;}
     if (action === "update-installed") queueInstalledUpdate(el.dataset.id).catch(e=>status("Could not queue update: "+String(e).slice(0,160),true));
     if (action === "update-all") updateAll();
     if (action === "content-action") setContentAction(el.dataset.id,value);
