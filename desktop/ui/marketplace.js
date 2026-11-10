@@ -122,9 +122,9 @@
     // Basic safe Markdown presentation: no raw HTML, scripts, embeds or remote
     // markdown links. Preserve explanatory text and list structure.
     return String(raw||"").slice(0,50000).split(/\r?\n/).map(line=>{
-      const text=escape(line).replace(/\\*\\*([^*]+)\\*\\*/g,"<strong>$1</strong>")
+      const text=escape(line).replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")
         .replace(/`([^`]+)`/g,"<code>$1</code>")
-        .replace(/\\[([^\\]]+)\\]\\((https:\\/\\/[^\\s)]+)\\)/g,
+        .replace(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/g,
           (_,label,url)=>'<a href="'+url+'" target="_blank" rel="noopener noreferrer">'+label+'</a>');
       if(/^###?\s+/.test(line))return '<h3>'+text.replace(/^#{2,3}\s+/,"")+'</h3>';
       if(/^#\s+/.test(line))return '<h2>'+text.replace(/^#\s+/,"")+'</h2>';
