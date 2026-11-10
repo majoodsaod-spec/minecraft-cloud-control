@@ -122,7 +122,10 @@
     // Basic safe Markdown presentation: no raw HTML, scripts, embeds or remote
     // markdown links. Preserve explanatory text and list structure.
     return String(raw||"").slice(0,50000).split(/\r?\n/).map(line=>{
-      const text=escape(line);
+      const text=escape(line).replace(/\\*\\*([^*]+)\\*\\*/g,"<strong>$1</strong>")
+        .replace(/`([^`]+)`/g,"<code>$1</code>")
+        .replace(/\\[([^\\]]+)\\]\\((https:\\/\\/[^\\s)]+)\\)/g,
+          (_,label,url)=>'<a href="'+url+'" target="_blank" rel="noopener noreferrer">'+label+'</a>');
       if(/^###?\s+/.test(line))return '<h3>'+text.replace(/^#{2,3}\s+/,"")+'</h3>';
       if(/^#\s+/.test(line))return '<h2>'+text.replace(/^#\s+/,"")+'</h2>';
       if(/^[-*]\s+/.test(line))return '<p class="mc-detail-bullet">• '+text.slice(2)+'</p>';
@@ -200,6 +203,7 @@
     state.detailLoading=true;state.detailsVersionsLoading=true;state.detailVersions=[];
     const epoch=++state.detailEpoch;
     render(state.online);
+    root()?.scrollIntoView({behavior:"smooth",block:"start"});
     try{
       const [info,versions]=await Promise.all([
         invoke("modrinth_project",{projectId:id}),
@@ -404,7 +408,7 @@
       .filter(name=>!knownNames.has(name)).sort((a,b)=>a.localeCompare(b));
     const title=state.tab==="installed"?"Installed content":
       state.tab==="updates"?"Compatible updates":"Pending content changes";
-    const content=state.inventoryLoaded?(
+    const content=(state.tab==="queue"?state.queueLoaded&&state.actionsLoaded:state.inventoryLoaded)?(
       state.tab==="queue"?
         (queued.length||actions.length?
           '<div class="mc-managed-list">'+
