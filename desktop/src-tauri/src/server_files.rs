@@ -532,7 +532,9 @@ async fn modrinth_queue_batch(items:Vec<Value>,root_id:String)->Result<Value,Str
                 let project=dep["project_id"].as_str().ok_or("Dependency has no resolvable project ID")?;
                 let requested=dep["version_id"].as_str();
                 let staged=selected.get(project).or_else(||existing.get(project));
-                let saved=installed.get(project).filter(|v|v["enabled"]!=false);
+                let saved=installed.get(project).filter(|v|
+                    v["enabled"]!=false &&
+                    !["disable","remove"].contains(&actions[project].as_str().unwrap_or("")));
                 let resolved=staged.or(saved).ok_or_else(||
                     format!("{id} requires {project}. Add its compatible release first."))?;
                 let actual=resolved["versionId"].as_str();
