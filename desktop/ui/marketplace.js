@@ -647,8 +647,10 @@
     try{
       await invoke("modrinth_queue_remove",{projectId});
       delete state.queued[projectId];
+      // The backend may have cancelled this install's newly queued dependencies too.
+      await ensureQueueLoaded(true);
       renderInstalled();renderResults();renderInstalledManager();renderDetail();
-      status("Queued install cancelled. No plugin files were changed.",false);
+      status("Queued install cancelled, including its linked dependencies. No running files were changed.",false);
     }catch(e){status("Could not remove queued install: "+String(e).slice(0,150),true)}
   }
   async function ensureInventoryLoaded(force=false){
@@ -767,8 +769,9 @@
     const candidate=state.hits.find(x=>x.project_id===projectId);
     const managed=state.inventory.installed?.[projectId];
     const title=candidate?.title||state.detailInfo?.title||managed?.title||projectId;
-    if(managed&&!state.latestReleases[projectId]?.id)
-      return status("Installed project version is still being checked.",true);
+    if(managed&&!state.latestReleases[projectId]?.id&&
+       !(state.detailId===projectId&&state.detailVersions.length))
+      return status("Installed project versions are still being checked.",true);
     const kind=state.detailId===projectId?state.detailKind:managed?.kind||state.kind;
     state.installing=projectId;
     status("Checking compatible Paper 26.3 release for "+title+"…",false);
@@ -791,7 +794,7 @@
           details+"\\n\\nThey apply on the next safe server startup."))return;
       }
       if(batch.length>1){
-        await invoke("modrinth_queue_batch",{items:batch});
+        await invoke("modrinth_queue_batch",{items:batch,rootId:projectId});
       }else{
         await invoke("modrinth_queue_add",{projectId,versionId:version.id,kind,title});
       }
