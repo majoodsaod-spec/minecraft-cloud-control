@@ -147,12 +147,13 @@ test("Modrinth discovery loads popular projects and offers real browsing control
   assert.match(config.app.security.csp,/https:\/\/cdn\.modrinth\.com/);
 });
 
-test("Marketplace still installs verified files onto the live Paper server",()=>{
+test("Marketplace stages verified Paper releases so users can cancel before restart",()=>{
   assert.match(market,/invoke\("modrinth_versions"/);
-  assert.match(market,/invoke\("direct_command"/);
-  assert.match(market,/kind: "marketplace-install"/);
+  assert.match(market,/await invoke\("modrinth_queue_add"/);
+  assert.match(market,/await invoke\("modrinth_queue_remove"/);
+  assert.match(market,/queued\?"Cancel"/);
+  assert.match(market,/state\.version!=="26\.3"/);
   assert.match(ui,/case "market-restart"/);
-  assert.match(market,/state\.version !== "26\.3"/);
 });
 
 test("a stored NetBird manual override is visible and can be cleared without re-entering secrets",()=>{
@@ -297,9 +298,26 @@ test("Lifecycle operations show real stages and suppress stale uptime and empty 
   assert.match(ui,/beginOperation\("restarting"\)/);
   assert.match(ui,/beginOperation\("restoring"\)/);
 });
+test("Modrinth details are clickable, escaped, and have a back action",()=>{
+  assert.match(market,/async function openDetail\(/);
+  assert.match(market,/function renderDetail\(/);
+  assert.match(market,/function detailBody\(/);
+  assert.match(market,/data-market-action="details"/);
+  assert.match(market,/data-market-action="back-details"/);
+  assert.match(market,/invoke\("modrinth_project"/);
+  assert.match(rust,/async fn modrinth_project\(/);
+  assert.match(rust,/modrinth_search,modrinth_versions,modrinth_project/);
+  assert.match(marketStyle,/\.mc-detail-hero/);
+});
+test("Queued removals are hidden from Installed but remain cancellable in Queue",()=>{
+  assert.match(market,/state\.contentActions\[id\]!=="remove"/);
+  assert.match(market,/state\.tab==="queue"/);
+  assert.match(market,/modrinth_content_action_remove/);
+  assert.match(market,/Cancel.*remove|Cancel removal/s);
+});
 test("Marketplace supports removing queued cards and installed version comparison",()=>{
   assert.match(market,/data-market-action="unqueue"/);
-  assert.match(market,/mc-queue-remove/);
+  assert.match(market,/data-market-action="cancel-content"/);
   assert.match(market,/modrinth_installed_inventory/);
   assert.match(market,/record\.versionId===latest\.id/);
   assert.match(market,/Queue update/);
