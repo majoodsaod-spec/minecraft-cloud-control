@@ -424,6 +424,7 @@ function bedrockHealthPanel(){
     needs_setup:"Playit configuration missing",
     misconfigured:"Geyser configuration invalid",
     invalid_setup:"Invalid Playit Geyser YAML",
+    agent_missing:"Playit agent failed to start",
     unavailable:"Geyser / Floodgate unavailable",
     listener_missing:"Bedrock listener missing",
     error:"Playit signaling error"
@@ -437,7 +438,7 @@ function bedrockHealthPanel(){
   const checks=b?row("Geyser / Floodgate JARs",bool(b.geyserInstalled&&b.floodgateInstalled))
     +row("NetherNet / Floodgate config",bool(b.configValid))
     +row("Playit Geyser YAML configured",bool(b.playitSettingsConfigured))
-    +row("Playit agent configured",bool(b.playitAgentConfigured))
+    +row("Playit agent running at startup",bool(b.playitAgentConfigured))
     +row("External signaling registered",bool(b.signalingRegistered))
     +row("Local UDP listener :19132",bool(b.localUdpListening))
     +row("Local TCP listener :19132",bool(b.localTcpListening)):"";
