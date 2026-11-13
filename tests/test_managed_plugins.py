@@ -108,7 +108,40 @@ class PluginInstallerTests(unittest.TestCase):
         self.assertEqual(result["java"]["auth-type"],"floodgate")
         self.assertEqual(result["bedrock"]["transport"],"nethernet")
         self.assertEqual(result["bedrock"]["port"],19132)
+        self.assertEqual(result["bedrock"]["address"],"0.0.0.0")
         self.assertEqual(result["bedrock"]["signaling"]["token"],"SECRET_FROM_ENV")
+
+    def test_cached_geyser_and_floodgate_are_refreshed_on_every_session(self):
+        folder=self.root/"plugins"
+        folder.mkdir()
+        payload=fake_plugin_jar()
+        (folder/"Geyser-Spigot.jar").write_bytes(payload)
+        (folder/"floodgate-spigot.jar").write_bytes(payload)
+        enabled={"EssentialsX.jar":False,"Chunky.jar":False,
+                 "PerformanceAnalyzer.jar":False,"LetMeDespawn.jar":False,
+                 "Geyser-Spigot.jar":True,"floodgate-spigot.jar":True}
+        def replace_jar(url,dest,checksum):
+            dest.write_bytes(payload+b"refresh")
+        with patch.object(managed_plugins,"geyser_build",return_value=("https://official.example/new.jar",None)):
+            with patch.object(managed_plugins,"download_jar",side_effect=replace_jar) as download:
+                installed=managed_plugins.install_managed_plugins(folder,enabled)
+                self.assertEqual(download.call_count,2)
+        self.assertIn("Geyser-Spigot.jar",installed)
+        self.assertIn("floodgate-spigot.jar",installed)
+
+    def test_cannot_refresh_does_not_remove_existing_valid_pair(self):
+        folder=self.root/"plugins"
+        folder.mkdir()
+        payload=fake_plugin_jar()
+        for name in ("Geyser-Spigot.jar","floodgate-spigot.jar"):
+            (folder/name).write_bytes(payload)
+        enabled={name:False for name in ("EssentialsX.jar","Chunky.jar",
+                                        "PerformanceAnalyzer.jar","LetMeDespawn.jar")}
+        with patch.object(managed_plugins,"geyser_build",side_effect=RuntimeError("temporary offline")):
+            installed=managed_plugins.install_managed_plugins(folder,enabled)
+        self.assertIn("Geyser-Spigot.jar",installed)
+        self.assertIn("floodgate-spigot.jar",installed)
+        self.assertEqual((folder/"Geyser-Spigot.jar").read_bytes(),payload)
 
     def test_bad_playit_configuration_is_rejected(self):
         folder=self.root/"plugins"
