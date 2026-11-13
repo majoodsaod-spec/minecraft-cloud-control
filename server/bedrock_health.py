@@ -60,6 +60,14 @@ class BedrockHealth:
         self.playit_agent = os.environ.get("PLAYIT_AGENT_CONFIGURED", "").lower() == "true" if playit_agent is None else playit_agent
         self.public_address = public_address if public_address is not None else self._public_address()
         self.config = self._config_check()
+        self.whitelist_enabled = None
+        try:
+            settings = (self.data / "server.properties").read_text(encoding="utf-8").splitlines()
+            values = dict(line.strip().split("=", 1) for line in settings
+                          if "=" in line and not line.lstrip().startswith("#"))
+            self.whitelist_enabled = values.get("white-list", "false").lower() == "true"
+        except (OSError, UnicodeError, ValueError):
+            pass
         self._port_sample = {"tcp": None, "udp": None}
         self._port_sample_at = 0.0
 
@@ -174,5 +182,6 @@ class BedrockHealth:
             "localTcpListening": listener["tcp"], "localUdpListening": listener["udp"],
             "localPort": cfg["port"], "host": self.public_address.get("host", ""),
             "port": self.public_address.get("port", 19132),
+            "whitelistEnabled": self.whitelist_enabled,
             "externalReachabilityVerified": False,
         }
