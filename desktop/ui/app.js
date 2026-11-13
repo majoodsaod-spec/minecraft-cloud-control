@@ -423,6 +423,7 @@ function bedrockHealthPanel(){
     awaiting_signaling:"Awaiting Playit registration",
     needs_setup:"Playit configuration missing",
     misconfigured:"Geyser configuration invalid",
+    invalid_setup:"Invalid Playit Geyser YAML",
     unavailable:"Geyser / Floodgate unavailable",
     listener_missing:"Bedrock listener missing",
     error:"Playit signaling error"
