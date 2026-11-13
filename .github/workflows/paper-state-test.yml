@@ -168,6 +168,7 @@ jobs:
           CLOUDFLARE_BRIDGE_TOKEN: ${{ secrets.CLOUDFLARE_BRIDGE_TOKEN }}
           MINECRAFT_DIRECT_TOKEN: ${{ secrets.MINECRAFT_DIRECT_TOKEN }}
           GEYSER_PLAYIT_CONFIG: ${{ secrets.GEYSER_PLAYIT_CONFIG }}
+          PLAYIT_AGENT_CONFIGURED: ${{ secrets.PLAYIT_SECRET_KEY != '' }}
           CHUNKY_PREGEN_RADIUS: ${{ vars.CHUNKY_PREGEN_RADIUS }}
         run: |
           python server/continuous_paper.py
