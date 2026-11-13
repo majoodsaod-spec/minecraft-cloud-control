@@ -33,7 +33,7 @@ jobs:
         with:
           workspaces: desktop/src-tauri -> target
       - name: Set up Python for installer icon
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Create polished native Windows icon
