@@ -152,6 +152,8 @@ class BedrockHealth:
             status, message = "misconfigured", "Geyser must use NetherNet on 0.0.0.0:19132 with Floodgate authentication."
         elif not self.playit_snippet:
             status, message = "needs_setup", "Add GEYSER_PLAYIT_CONFIG from Playit > Bedrock (NetherNet) > Configuration help > Geyser."
+        elif not self.playit_agent:
+            status, message = "agent_missing", "Playit agent did not start on this runner. Check PLAYIT_SECRET_KEY and the agent startup step."
         elif error:
             status, message = "error", last_error
         elif registered:
