@@ -56,6 +56,7 @@ class BedrockHealth:
         self.last_error = ""
         self.started_at = time.monotonic()
         self.playit_snippet = bool(os.environ.get("GEYSER_PLAYIT_CONFIG", "").strip()) if playit_snippet is None else playit_snippet
+        self.invalid_playit = os.environ.get("GEYSER_PLAYIT_CONFIG_INVALID", "").lower() == "true"
         self.playit_agent = os.environ.get("PLAYIT_AGENT_CONFIGURED", "").lower() == "true" if playit_agent is None else playit_agent
         self.public_address = public_address if public_address is not None else self._public_address()
         self.config = self._config_check()
@@ -145,6 +146,8 @@ class BedrockHealth:
         cfg = self.config
         if not cfg["geyserInstalled"] or not cfg["floodgateInstalled"]:
             status, message = "unavailable", "Geyser and Floodgate must both be installed and enabled."
+        elif self.invalid_playit:
+            status, message = "invalid_setup", "Geyser configuration failed. Re-copy the private Playit NetherNet Geyser YAML into GEYSER_PLAYIT_CONFIG."
         elif not cfg["configValid"]:
             status, message = "misconfigured", "Geyser must use NetherNet on 0.0.0.0:19132 with Floodgate authentication."
         elif not self.playit_snippet:
