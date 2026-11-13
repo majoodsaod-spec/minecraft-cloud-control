@@ -20,6 +20,7 @@ class BedrockHealthTests(unittest.TestCase):
         (plugins / "Geyser-Spigot.jar").write_bytes(b"jar")
         (plugins / "floodgate-spigot.jar").write_bytes(b"jar")
         self.config = plugins / "Geyser-Spigot" / "config.yml"
+        (self.root / "server.properties").write_text("white-list=true\nenforce-whitelist=true\n", encoding="utf-8")
         self.config.write_text(yaml.safe_dump({
             "bedrock": {"address": "0.0.0.0", "port": 19132, "transport": "nethernet"},
             "java": {"auth-type": "floodgate"},
@@ -47,6 +48,7 @@ class BedrockHealthTests(unittest.TestCase):
         self.assertTrue(state["signalingRegistered"])
         self.assertFalse(state["externalReachabilityVerified"])
         self.assertEqual(state["host"], "bedrock.example.org")
+        self.assertTrue(state["whitelistEnabled"])
 
     def test_missing_secret_is_actionable_but_not_exposed(self):
         health = self.health(secret=False)
