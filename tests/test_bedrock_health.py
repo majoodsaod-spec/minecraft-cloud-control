@@ -75,6 +75,20 @@ class BedrockHealthTests(unittest.TestCase):
         health.observe("Registered with the external signaling service")
         self.assertEqual(health.snapshot(True)["status"], "signaling_registered")
 
+    def test_playit_agent_must_actually_start(self):
+        health = bedrock_health.BedrockHealth(
+            self.root, playit_snippet=True, playit_agent=False,
+            public_address={"host": "bedrock.example.org", "port": 19132})
+        health.observe("Registered with the external signaling service")
+        self.assertEqual(health.snapshot(True)["status"], "agent_missing")
+
+    def test_invalid_external_yaml_is_reported_without_secret(self):
+        with patch.dict("os.environ", {"GEYSER_PLAYIT_CONFIG_INVALID": "true"}):
+            health = self.health()
+            state = health.snapshot(True)
+            self.assertEqual(state["status"], "invalid_setup")
+            self.assertNotIn("SECRET", str(state))
+
     def test_local_listener_is_required_for_ready_state(self):
         health = self.health()
         health.observe("Registered with the external signaling service")
