@@ -326,6 +326,11 @@ class LiveBridge:
                     "banned":names("banned-players.json"),
                     "operators":names("ops.json"),
                     "whitelistEnabled":whitelist_enabled}
+        if kind=="bedrock-diagnostics":
+            health=getattr(self,"bedrock_health",None)
+            if health is None:
+                return {"status":"unavailable","message":"Bedrock diagnostics unavailable in this runner session."}
+            return health.snapshot(self.ready.is_set())
         if kind=="plugins-list":
             return [{"name":p.name,"bytes":p.stat().st_size} for p in (self.data/"plugins").glob("*.jar")][:100]
         if kind=="files-tree":
@@ -479,6 +484,7 @@ class LiveBridge:
                     "cpuPercent":self._cpu_percent(),**self._disk_space(),
                     **(self.metrics.snapshot() if self.metrics is not None else {"tps":None,"mspt":None}),
                     "startupTimings":dict(self.startup_timings),
+                    "bedrock":self.bedrock_health.snapshot(self.ready.is_set()) if getattr(self,"bedrock_health",None) is not None else None,
                     "phase":self.lifecycle_phase if self.lifecycle_phase!="starting" else ("running" if self.ready.is_set() else "starting")}
             if status["ready"]:
                 self.performance_history.record({
