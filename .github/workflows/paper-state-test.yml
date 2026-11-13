@@ -28,7 +28,7 @@ jobs:
       backed_up: ${{ steps.backedup.outputs.ready }}
       stop_requested: ${{ steps.paper.outputs.stop_requested }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -226,7 +226,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Check whether dashboard requested stop
         id: power
         env:
@@ -253,7 +253,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Delete surplus Minecraft world backups, never the latest ten
         env:
           GH_TOKEN: ${{ github.token }}
