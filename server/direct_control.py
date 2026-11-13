@@ -85,6 +85,7 @@ class DirectControl:
                     **(b.metrics.snapshot() if getattr(b,"metrics",None) is not None else {"tps":None,"mspt":None}),
                     "connection": "netbird",
                     "startupTimings": dict(getattr(b, "startup_timings", {})),
+                    "bedrock": b.bedrock_health.snapshot(ready) if getattr(b, "bedrock_health", None) is not None else None,
                 }
 
             def stream(self):
