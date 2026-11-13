@@ -413,6 +413,44 @@ function resourceHistory(){
     ${btn("Run 60-second Spark profile","spark-profile","small flat",!connectedLive())}
     <p class="field-tip">On-demand profiling may briefly add overhead. After 60 seconds, open Live Console for the Spark report URL.</p>`);
 }
+function bedrockHealthPanel(){
+  const online=connectedLive();
+  const b=online?currentPaper().bedrock:null;
+  const ok=b?.status==="signaling_registered";
+  const labels={
+    signaling_registered:"Signaling registered",
+    starting:"Geyser starting",
+    awaiting_signaling:"Awaiting Playit registration",
+    needs_setup:"Playit configuration missing",
+    misconfigured:"Geyser configuration invalid",
+    unavailable:"Geyser / Floodgate unavailable",
+    listener_missing:"Bedrock listener missing",
+    error:"Playit signaling error"
+  };
+  const indicator=online&&b?(labels[b.status]||"Checking Bedrock"):online?"No health report from this runner":"Paper live connection required";
+  const row=(name,value)=>`<div class="list-stat"><span>${name}</span><strong>${esc(value)}</strong></div>`;
+  const bool=v=>v===true?"● Yes":v===false?"○ No":"—";
+  const source=b?.host?`${b.host}:${b.port||19132}`:"No Bedrock address saved";
+  const detail=b?`<p class="field-tip" style="margin:10px 0 15px">${esc(b.message||"Bedrock health is not available.")}</p>`
+    :'<p class="field-tip" style="margin:10px 0 15px">Connect to the live Paper server, then run a Bedrock check. A saved address alone does not prove that Geyser is online.</p>';
+  const checks=b?row("Geyser / Floodgate JARs",bool(b.geyserInstalled&&b.floodgateInstalled))
+    +row("NetherNet / Floodgate config",bool(b.configValid))
+    +row("Playit Geyser YAML configured",bool(b.playitSettingsConfigured))
+    +row("Playit agent configured",bool(b.playitAgentConfigured))
+    +row("External signaling registered",bool(b.signalingRegistered))
+    +row("Local UDP listener :19132",bool(b.localUdpListening))
+    +row("Local TCP listener :19132",bool(b.localTcpListening)):"";
+  return panel("Bedrock · Geyser connection",
+    `${pill(esc(indicator),ok?"":"warn")}${detail}${checks}
+    ${row("Saved Bedrock address",source)}
+    ${row("Friend can reach server", "Not verified remotely")}
+    <p class="field-tip" style="margin:12px 0 16px">Green signaling confirms Geyser registered with Playit, not that Bedrock players can join. Your friend must use the Bedrock (NetherNet) tunnel address and port 19132. If whitelist is enabled, use <code>fwhitelist add Gamertag</code> in Live Console. Secrets are not displayed.</p>
+    <div class="header-actions" style="justify-content:flex-start">
+    ${btn("↻ Check Geyser connection","check-geyser","primary",!online)}
+    </div>`,
+    ok?pill("● SIGNALING CONNECTED",""):pill("◷ NOT VERIFIED","warn"));
+}
+
 function drawOverview(){
   const main=latestServerRun(),live=currentPaper(),online=connectedLive();
   const github=state.github.connected;
@@ -442,7 +480,7 @@ function drawOverview(){
    ${panel("Recent activity",recent.length?`<div class="run-list">${recent.map(r=>runRow(r)).join("")}</div>`:boxEmpty("No runs loaded","Connect your GitHub account to see recent activity.","⎇"),`<button class="btn small flat" data-page="workflows">View all →</button>`)}
    ${panel("Connection health",`<div class="list-stat"><span>GitHub</span><strong>${github?"● Connected":"○ Not connected"}</strong></div><div class="list-stat"><span>Direct Paper · NetBird</span><strong>${directOnline()?"● Connected":"○ Not connected"}</strong></div>${!directOnline()&&state.directError?`<p class="field-tip" style="margin:10px 0 12px;color:#ae624f">Direct connection: ${esc(state.directError)}</p>`:""}<div class="list-stat"><span>Cloudflare bridge</span><strong>${state.cloud?.bridge?.status?.ready?"● Connected":"○ Offline / unavailable"}</strong></div><div class="list-stat"><span>NetBird live stream</span><strong>${state.directStreamConnected?"● Streaming":directOnline()?"◷ Polling":"○ Not connected"}</strong></div><div class="list-stat"><span>Last direct heartbeat</span><strong>${state.directFetchedAt?Math.floor((Date.now()-state.directFetchedAt)/1000)+" s ago":"—"}</strong></div><div class="list-stat"><span>Minecraft workflow</span><strong>${main?esc(main.conclusion||main.status||"unknown"):"—"}</strong></div><div class="list-stat"><span>Latest run</span><strong>${main?esc("#"+main.run_number):"—"}</strong></div><div class="list-stat"><span>World backups</span><strong>${(state.overview?.artifacts||[]).filter(a=>!a.expired).length}</strong></div><p class="field-tip" style="margin-top:18px">GitHub workflow management works without Cloudflare. Safe live commands need a working server bridge.</p>`)}
    </div>`;
-  $("#content").innerHTML=header("SERVER","Overview","Manage your server, plugins, files and backups.",btn("↻ Refresh","refresh","flat"))+hero+recoveryWarning()+stats+(online&&!pendingOperation?resourceHistory():"")+runnerCard+startupDiagnostics()+actions;
+  $("#content").innerHTML=header("SERVER","Overview","Manage your server, plugins, files and backups.",btn("↻ Refresh","refresh","flat"))+hero+recoveryWarning()+stats+(online&&!pendingOperation?resourceHistory():"")+runnerCard+bedrockHealthPanel()+startupDiagnostics()+actions;
 }
 function drawWorkflows(){
   const workflows=(state.workflows||[]).filter(w=>w.state!=="deleted"),runs=state.overview?.runs||[];
@@ -549,6 +587,7 @@ function drawConnections(){
      ${state.cloudError?`<p class="field-tip" style="color:#c46b53">Last error: ${esc(state.cloudError)}</p>`:""}
    `)}</div>`+
    `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Direct Paper · NetBird</h2>${directOnline()?pill("● Private connection online",""):pill("○ Not connected","warn")}</div><p class="field-tip">Connect directly to your temporary GitHub Actions Paper runner. NetBird must be connected on your Windows PC. The app automatically discovers connected minecraft-paper-* peers after each restart. Live console and server metrics work without Cloudflare.</p><div class="notice good" style="margin-top:17px"><label for="netbirdAuto" style="display:flex;align-items:center;gap:12px;cursor:pointer"><input id="netbirdAuto" type="checkbox" ${state.netbirdAuto?.enabled?"checked":""} style="width:17px;height:17px;accent-color:#158b69"><span><strong>Automatically connect NetBird</strong><span style="display:block;font-size:11px;margin-top:5px">Connect on app launch and disconnect when it closes, only if Minecraft Cloud started the VPN itself.</span></span></label><div style="margin-top:9px;font-size:11px">NetBird: ${state.netbirdAuto?.connected?"Connected":"Not connected"} ${state.netbirdAuto?.ownedByApp?"· Managed by Minecraft Cloud":""}</div></div><div class="field" style="margin-top:16px"><label for="directToken">Direct-control secret</label><input id="directToken" type="password" autocomplete="off" placeholder="Value saved as MINECRAFT_DIRECT_TOKEN in GitHub Secrets"></div><div class="field"><label for="directPeer">Manual NetBird peer IP (optional)</label><input id="directPeer" placeholder="Leave blank for automatic discovery"></div>${state.directPeerConfig?.manual?`<div class="notice" style="margin-bottom:12px"><strong>Manual peer override is active:</strong> ${esc(state.directPeerConfig.peerIp)}. This may point to an old GitHub runner.<div style="margin-top:10px"><button class="btn primary" data-action="clear-direct-peer">Use active server automatically</button></div></div>`:`<p class="field-tip" style="margin:0 0 12px">Automatic discovery: uses the active Minecraft GitHub workflow when GitHub is connected.</p>`}<div class="header-actions" style="justify-content:flex-start"><button class="btn primary" data-action="connect-direct">Connect Direct Paper</button><button class="btn flat" data-action="test-direct">Test connection</button></div>${state.directError?`<p class="field-tip" style="color:#b96154;margin-top:12px">${esc(state.directError)}</p>`:""}</section>`+
+   `<div style="margin-top:16px">${bedrockHealthPanel()}</div>`+
    `<section class="panel" style="margin-top:16px"><div class="panel-head"><h2 class="panel-title">Windows app updates</h2>${state.update?.available?pill("● New build available",""):pill("Installed app","muted")}</div><p class="field-tip">Check GitHub for the latest successful Windows installer. Quick Update upgrades your existing installation without manually downloading or extracting ZIP files. Your login remains saved on this PC.</p><div class="header-actions" style="justify-content:flex-start;margin-top:16px"><button class="btn primary" data-action="check-update">${state.update?.available?"Install update #"+state.update.runNumber:"↻ Quick Update"}</button><span class="field-tip" id="updateStatusConnections">${esc(state.updateMessage|| (state.update?"Installed build "+(state.update.currentBuild||"legacy")+" · Latest build "+state.update.runNumber:"No update check performed yet"))}</span></div></section>`;
 }
 // Edits survive background telemetry updates, navigation, and incidental
@@ -687,6 +726,21 @@ async function action(type,id){
   switch(type){
   case "refresh":return refresh();
   case "check-update":return quickUpdate();
+  case "check-geyser":{
+    if(!connectedLive())return flash("Connect to the live Paper server before testing Geyser.");
+    try{
+      if(directOnline()){
+        const check=await run("direct_command",{kind:"bedrock-diagnostics",args:{}});
+        if(check?.result)state.direct={...state.direct,bedrock:check.result};
+      }else{
+        await loadCloud(false);
+      }
+      render();
+      const health=currentPaper()?.bedrock;
+      flash(health?.message||"Geyser health is not available from this runner. Start a new server session with the latest code.");
+    }catch(error){flash("Geyser check failed: "+errorText(error));}
+    return;
+  }
   case "spark-profile":{
     if(!connectedLive())return flash("Connect to Paper before running diagnostics.");
     if(!await dialog("Profile Paper for 60 seconds?","This runs the Spark profiler on the live server for one minute. It may add slight load; the report appears in Live Console."))return;
