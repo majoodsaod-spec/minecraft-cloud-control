@@ -1209,6 +1209,7 @@ async fn direct_command(kind: String, args: Value) -> Result<Value, String> {
         "op","deop","players-list","plugins-list","files-list","files-tree","files-read",
         "files-write","files-delete","files-mkdir","files-rename",
         "files-upload","files-download","marketplace-install","marketplace-inventory",
+        "bedrock-diagnostics",
     ];
     if !ALLOWED.contains(&kind.as_str()) { return Err("Unsupported Paper command".into());}
     if !args.is_object(){return Err("Invalid command arguments".into());}
