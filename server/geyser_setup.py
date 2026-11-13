@@ -42,7 +42,7 @@ def configure_geyser(data: Path) -> None:
     bedrock = config.setdefault("bedrock", {})
     if not isinstance(bedrock, dict):
         raise RuntimeError("Invalid Geyser Bedrock section")
-    bedrock.update({"port": 19132, "clone-remote-port": False, "transport": "nethernet"})
+    bedrock.update({"address": "0.0.0.0", "port": 19132, "clone-remote-port": False, "transport": "nethernet"})
     java = config.setdefault("java", {})
     if not isinstance(java, dict):
         raise RuntimeError("Invalid Geyser Java section")
@@ -61,6 +61,7 @@ def configure_geyser(data: Path) -> None:
         _merge(bedrock, overrides["bedrock"])
         # Keep the server's real ports and secure login policy unchanged.
         bedrock["transport"] = "nethernet"
+        bedrock["address"] = "0.0.0.0"
         bedrock["port"] = 19132
         bedrock["clone-remote-port"] = False
         java["auth-type"] = "floodgate"
