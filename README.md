@@ -200,3 +200,45 @@ The repository now includes a lightweight, polished **Tauri Windows app** in [`d
 Live Paper console, player telemetry and **safe** Save & Stop / Save & Restart remain available when the optional Cloudflare live bridge is healthy. The app deliberately refuses to force-cancel the Minecraft runner, which would bypass the verified backup sequence.
 
 An automatic Windows NSIS installer workflow is available at [Build Minecraft Cloud Windows installer](https://github.com/majoodsaod-spec/minecraft-cloud-control/actions/workflows/build-windows.yml). Download the `Minecraft-Cloud-Windows-Installer` build artifact from a successful run, unzip it and run the `*-setup.exe` installer. See [the desktop guide](desktop/README.md) for requirements, token permissions, security and local build details.
+
+
+## Bedrock · Geyser health after every runner restart
+
+Every new Paper runner refreshes Geyser-Spigot and Floodgate from their official latest build
+endpoints (verified JAR structure and published SHA-256 when present), then recreates
+`plugins/Geyser-Spigot/config.yml` from the Geyser template and the protected
+`GEYSER_PLAYIT_CONFIG` Actions secret. The configuration enforces NetherNet,
+`bedrock.address=0.0.0.0`, `bedrock.port=19132`, and Floodgate authentication.
+If the official download temporarily fails, a previously valid JAR can be reused,
+but it is explicitly reported as unverified for current Bedrock compatibility.
+
+The Windows app now shows **Overview / Connections → Bedrock · Geyser connection**
+and a **Check Geyser connection** button. Its private NetBird and Cloudflare telemetry
+reports whether both plugins are present, Geyser has a valid NetherNet/Floodgate
+configuration, the Playit Geyser YAML secret is provided, TCP/UDP listeners are present,
+and Geyser printed **Registered with the external signaling service** during this
+specific runtime session. The app never returns the signaling token or Floodgate key.
+**A registered signaling connection does not prove that an external Bedrock friend can join.**
+
+If the status is **Playit configuration missing / invalid**, visit the **Minecraft
+Bedrock (NetherNet)** tunnel in Playit → **Configuration help → Geyser → Copy**.
+Save the complete private YAML snippet as the GitHub Actions secret
+`GEYSER_PLAYIT_CONFIG`. Do not paste the secret into the app, chat or repository.
+Also verify the Playit agent is connected to the correct account and that the
+Bedrock tunnel, separate from the Java tunnel, exists. Restart Paper **safely**
+to inject changed Actions secrets and get refreshed Geyser builds.
+
+For your friend, use the configured **Bedrock** hostname (currently recorded in
+`server/bedrock.json`) and port **19132**, not the Java tunnel's address. Verify
+that Playit's live tunnel page shows that same hostname; the JSON file is display
+configuration, not a live tunnel query. Minecraft Bedrock 26.60+ requires NetherNet.
+If Geyser is registered but the player is rejected because whitelist is on, use
+`fwhitelist add BedrockGamertag` in the authenticated live console. If the friend
+still sees "Unable to connect" or "Door", check the exact client version and the
+NetherNet tunnel type. The authoritative playit guide is
+https://playit.gg/support/use-geyser-on-paper/ .
+
+Geyser health updates only after a runner starts with the new code. A one-click
+Windows app update does not retrofit the telemetry into a currently running
+GitHub runner. World saves and Java connectivity are deliberately unaffected if
+an optional Playit configuration cannot be applied.
