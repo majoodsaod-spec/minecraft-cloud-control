@@ -441,11 +441,13 @@ function bedrockHealthPanel(){
     +row("Playit agent running at startup",bool(b.playitAgentConfigured))
     +row("External signaling registered",bool(b.signalingRegistered))
     +row("Local UDP listener :19132",bool(b.localUdpListening))
-    +row("Local TCP listener :19132",bool(b.localTcpListening)):"";
+    +row("Local TCP listener :19132",bool(b.localTcpListening))
+    +row("Paper whitelist enabled",bool(b.whitelistEnabled)):"";
   return panel("Bedrock · Geyser connection",
     `${pill(esc(indicator),ok?"":"warn")}${detail}${checks}
     ${row("Saved Bedrock address",source)}
     ${row("Friend can reach server", "Not verified remotely")}
+    ${b?.whitelistEnabled?notice("<strong>Whitelist is enabled:</strong> Add your friend with <code>fwhitelist add BedrockGamertag</code> in Live Console. Ordinary Java whitelisting may not authorize Floodgate players."):''}
     <p class="field-tip" style="margin:12px 0 16px">Green signaling confirms Geyser registered with Playit, not that Bedrock players can join. Your friend must use the Bedrock (NetherNet) tunnel address and port 19132. If whitelist is enabled, use <code>fwhitelist add Gamertag</code> in Live Console. Secrets are not displayed.</p>
     <div class="header-actions" style="justify-content:flex-start">
     ${btn("↻ Check Geyser connection","check-geyser","primary",!online)}
