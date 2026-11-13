@@ -24,6 +24,7 @@ from weekly_maintenance import read_policy, due as weekly_due, last_completed, m
 from direct_control import DirectControl
 from managed_plugins import install_managed_plugins
 from geyser_setup import configure_geyser
+from bedrock_health import BedrockHealth
 from pending_files import apply_pending
 from pending_operations import apply_pending_operations
 from pending_modrinth import apply_modrinth_queue
@@ -149,6 +150,8 @@ def run(jar: Path, recorder: LifecycleRecorder | None = None) -> None:
         synchronize_plugins()
     with recorder.stage("server_properties") if recorder else nullcontext():
         set_properties()
+    # Capture startup registration before the rolling console loses early logs.
+    bedrock_health = BedrockHealth(DATA)
     java_started = time.monotonic()
     proc = subprocess.Popen(
         ["java", "-Xms2G", "-Xmx8G", "-jar", str(jar), "--nogui"],
@@ -178,6 +181,7 @@ def run(jar: Path, recorder: LifecycleRecorder | None = None) -> None:
         for line in proc.stdout:
             print(line, end="", flush=True)
             tick_metrics.observe(line)
+            bedrock_health.observe(line)
             with lock:
                 log_lines.append(line.rstrip()[:400])
             if "Done (" in line and "For help" in line:
@@ -205,6 +209,7 @@ def run(jar: Path, recorder: LifecycleRecorder | None = None) -> None:
     bridge=LiveBridge(DATA,os.environ.get("GITHUB_RUN_ID",str(int(time.time()))),
                       players,lock,log_lines,ready,send,bridge_restart,bridge_shutdown,observed,proc.pid,
                       metrics=tick_metrics)
+    bridge.bedrock_health = bedrock_health
     direct=DirectControl(bridge)
     if recorder:
         bridge.startup_timings = recorder.public_timings()
