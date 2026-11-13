@@ -141,7 +141,14 @@ def synchronize_plugins() -> None:
     managed = install_managed_plugins(installed, enabled)
     # Floodgate credentials must not persist in public-facing artifacts.
     (DATA / "plugins" / "floodgate" / "key.pem").unlink(missing_ok=True)
-    configure_geyser(DATA)
+    try:
+        configure_geyser(DATA)
+    except Exception:
+        # An invalid external signaling secret is not a reason to terminate
+        # Java Paper or skip the world's safe backup lifecycle. Report only
+        # a generic diagnostic; parsing errors can contain secret YAML.
+        os.environ["GEYSER_PLAYIT_CONFIG_INVALID"] = "true"
+        print("WARNING: Geyser configuration could not be applied; Java Paper will continue. Recheck private Playit Geyser YAML.", flush=True)
     print(f"Configured {len(source)} uploaded and {len(managed)} managed Paper plugins", flush=True)
 
 
