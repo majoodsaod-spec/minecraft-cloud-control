@@ -168,23 +168,35 @@ def install_managed_plugins(plugins: Path, state: dict[str, bool]) -> list[str]:
         ("floodgate-spigot.jar", lambda: geyser_build("floodgate", "spigot")),
     ]
     installed = []
+    crossplay = {"Geyser-Spigot.jar", "floodgate-spigot.jar"}
     for filename, resolve in specs:
         target = plugins / filename
         if state.get(filename, True) is False:
             target.unlink(missing_ok=True)
             print(f"Managed plugin disabled: {filename}", flush=True)
             continue
-        if target.exists() and zipfile.is_zipfile(target):
+        cached = target.is_file() and zipfile.is_zipfile(target)
+        # A world archive includes plugin JARs. Reusing an old Geyser forever
+        # breaks Bedrock when Mojang changes protocol versions. Resolve both
+        # Geyser and Floodgate fresh on every new runner session. Downloads
+        # replace the cache atomically after a verified JAR is obtained.
+        if cached and filename not in crossplay:
             installed.append(filename)
             continue
         try:
             url, sha256 = resolve()
             download_jar(url, target, sha256)
-            print(f"Verified plugin installed: {filename}", flush=True)
+            print(f"Verified current plugin installed: {filename}", flush=True)
             installed.append(filename)
         except Exception as exc:
-            target.unlink(missing_ok=True)
-            print(f"WARNING: Managed plugin {filename} unavailable: {type(exc).__name__}", flush=True)
+            if cached:
+                # Preserve a working server on transient upstream outages,
+                # but NEVER claim the cached cross-play build is current.
+                print(f"WARNING: Could not refresh {filename} ({type(exc).__name__}); using cached JAR. Bedrock compatibility is unverified.", flush=True)
+                installed.append(filename)
+            else:
+                target.unlink(missing_ok=True)
+                print(f"WARNING: Managed plugin {filename} unavailable: {type(exc).__name__}", flush=True)
     # Never run one cross-play half without the other. Java clients must still
     # be able to play if a third-party download endpoint is temporarily down.
     bedrock_pair={"Geyser-Spigot.jar","floodgate-spigot.jar"}
