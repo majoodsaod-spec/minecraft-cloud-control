@@ -178,7 +178,7 @@ jobs:
       - name: Upload verified world backup
         id: backup
         if: success() && steps.power.outputs.enabled == 'true' && steps.select.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: minecraft-world
           path: |
@@ -213,7 +213,7 @@ jobs:
           python -c 'from pathlib import Path; from server.reliability import markdown_summary; print(markdown_summary(Path("cycle-output/lifecycle-report.json")))' >> "$GITHUB_STEP_SUMMARY" || echo "::warning::Optional lifecycle summary unavailable; verified backup flow unaffected"
       - name: Preserve safe diagnostics when startup fails
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: paper-startup-diagnostics-${{ github.run_id }}
           path: cycle-output/lifecycle-report.json
